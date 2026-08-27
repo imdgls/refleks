@@ -1,11 +1,17 @@
 import { useStore } from "@/shared/hooks";
-import { getRunTrace } from "@/shared/lib/api";
-import type { MousePoint, RunRecord } from "@/shared/types/ipc";
+import { getRunStatsEvents, getRunTrace } from "@/shared/lib/api";
+import type { MousePoint, RunRecord, RunStatsEvent } from "@/shared/types/ipc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { decodeTrace } from "../../lib/decodeTrace";
+import { computeMouseTraceAnalysis } from "../../lib/mouseAnalysis";
 import { fetchReplaySync, videoTimeToTraceEpochMs } from "../../lib/replaySync";
 import type { ReplaySync } from "../../lib/replaySync";
+import {
+  classificationIsMeaningful,
+  KillColourMap,
+  NEUTRAL_TRAIL_COLOR,
+} from "../../lib/trailClassification";
 import {
   buildFutureSegments,
   buildPastSegments,
@@ -17,13 +23,14 @@ import { screenModelFromSummary } from "../../lib/trailProjection";
 import type { ScreenModel } from "../../lib/trailProjection";
 
 /**
- * Draws the crosshair trail on top of a replay.
+ * Draws the crosshair trail on top of a replay, coloured by the app's own
+ * kill classification.
  *
  * Everything needed is derived from the run's file path, so this hangs off
  * the existing player without threading state through it: the run comes
- * from the store, its trace from the same lazy loader the trace tab uses,
- * and the video/trace alignment from the sidecar written when the replay
- * was trimmed.
+ * from the store, its trace and kill events from the same lazy loaders the
+ * trace tab uses, and the video/trace alignment from the sidecar written
+ * when the replay was trimmed.
  *
  * The overlay draws nothing at all - rather than something approximate -
  * whenever it cannot place the trail honestly: no sidecar (a replay from
@@ -33,16 +40,24 @@ import type { ScreenModel } from "../../lib/trailProjection";
  * capture segment of pre-roll from before the run began.
  */
 
-const TRAIL_COLOR = "#ffffff";
 const TRAIL_LINE_WIDTH = 2;
 const FUTURE_ALPHA = 0.33;
 
 /**
  * Matches the mode the standalone renderer settled on: the path the aim is
  * about to take reads far better on a flick than the path it already took.
- * Colours, slow motion, and a control for this arrive in later steps.
+ * Slow motion and a control for this arrive in later steps.
  */
 const TRAIL_MODE: TrailMode = "future";
+
+/**
+ * One frame at the default capture rate. A flick's span ends at the kill's
+ * exact millisecond while video frames land on their own grid, so the frame
+ * showing the kill can sit just past that end and would otherwise lose its
+ * colour at the moment it matters most. Erring generous only ever extends a
+ * flick's colour by about a frame.
+ */
+const FLICK_END_TOLERANCE_MS = 1000 / 30;
 
 function findRunByFilePath(
   sessions: { items: RunRecord[] }[],
@@ -75,13 +90,15 @@ export function ReplayTrailOverlay({
   );
 
   const [points, setPoints] = useState<MousePoint[] | null>(null);
+  const [events, setEvents] = useState<RunStatsEvent[] | null>(null);
   const [sync, setSync] = useState<ReplaySync | null>(null);
 
-  // Load the trace for this run. Same lazy fetch the trace tab uses, so a
-  // run that has already been inspected is served from the backend's cache.
+  // Trace and kill events use the same lazy fetches as the trace tab, so a
+  // run already inspected there is served from the backend's cache.
   useEffect(() => {
     let cancelled = false;
     setPoints(null);
+    setEvents(null);
     if (!filePath) return;
 
     getRunTrace(filePath)
@@ -91,6 +108,14 @@ export function ReplayTrailOverlay({
       })
       .catch(() => {
         if (!cancelled) setPoints([]);
+      });
+
+    getRunStatsEvents(filePath)
+      .then((loaded) => {
+        if (!cancelled) setEvents(loaded ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([]);
       });
 
     return () => {
@@ -116,6 +141,28 @@ export function ReplayTrailOverlay({
     () => (points && points.length > 1 ? new TraceLookup(points) : null),
     [points],
   );
+
+  // The classification is the app's own, not a second implementation of it,
+  // so a colour here means exactly what the same label means in the trace tab.
+  const analysis = useMemo(() => {
+    if (!run?.stats?.summary || !points || !events) return null;
+    return computeMouseTraceAnalysis(
+      run.stats.summary,
+      events,
+      points,
+      run.performances?.header,
+    );
+  }, [run, points, events]);
+
+  // Colouring is switched off deliberately where overshoot/undershoot would
+  // be meaningless - a tracking scenario that logs no kills, or a
+  // sustained-fire weapon whose "kill" is not a trigger pull - rather than
+  // being left to fall through as a silently colourless trail.
+  const colourMap = useMemo(() => {
+    if (!events) return null;
+    if (!classificationIsMeaningful(analysis, events).ok) return null;
+    return new KillColourMap(analysis, FLICK_END_TOLERANCE_MS);
+  }, [analysis, events]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -162,12 +209,17 @@ export function ReplayTrailOverlay({
       const traceMs = videoTimeToTraceEpochMs(sync, time, manualOffsetMs);
       if (!trace.inRange(traceMs)) return;
 
+      // The whole trail takes one colour: the flick its head is in. A trail
+      // spanning a boundary is coloured by the flick currently being flown,
+      // not split part-way along its length.
+      const colour = colourMap?.colourAt(traceMs) ?? NEUTRAL_TRAIL_COLOR;
+
       if (TRAIL_MODE === "past" || TRAIL_MODE === "past+future") {
         if (TRAIL_MODE === "past+future") {
           drawSegments(
             ctx,
             buildFutureSegments(trace, traceMs, model),
-            TRAIL_COLOR,
+            colour,
             TRAIL_LINE_WIDTH,
             FUTURE_ALPHA,
           );
@@ -175,14 +227,14 @@ export function ReplayTrailOverlay({
         drawSegments(
           ctx,
           buildPastSegments(trace, traceMs, model),
-          TRAIL_COLOR,
+          colour,
           TRAIL_LINE_WIDTH,
         );
       } else {
         drawSegments(
           ctx,
           buildFutureSegments(trace, traceMs, model),
-          TRAIL_COLOR,
+          colour,
           TRAIL_LINE_WIDTH,
         );
       }
@@ -190,7 +242,7 @@ export function ReplayTrailOverlay({
 
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
-  }, [trace, sync, run, videoRef, manualOffsetMs]);
+  }, [trace, sync, run, videoRef, manualOffsetMs, colourMap]);
 
   if (!trace || !sync) return null;
 
