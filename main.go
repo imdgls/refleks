@@ -105,7 +105,8 @@ func replayAssetHandlerForDir(replaysDir string) http.Handler {
 		// Serve exactly one decoded filename component. The URL is generated via
 		// PathEscape, but validate again before mapping it into the replay folder.
 		if name == "" || filepath.Base(name) != name || strings.Contains(name, "\\") ||
-			(filepath.Ext(name) != ".mp4" && filepath.Ext(name) != ".webm") {
+			(filepath.Ext(name) != ".mp4" && filepath.Ext(name) != ".webm" &&
+				!strings.HasSuffix(name, ".sync.json")) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

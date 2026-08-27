@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HistoryRun } from "../../lib/historyModels";
+import { ReplayTrailOverlay } from "./ReplayTrailOverlay";
 
 type Props = {
   primaryRun: HistoryRun;
@@ -688,6 +689,11 @@ function VideoPlayer({
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={() => setPlaying(false)}
+          />
+          <ReplayTrailOverlay
+            videoRef={videoRef}
+            filePath={filePath}
+            replayUrl={path}
           />
         </div>
       </div>
