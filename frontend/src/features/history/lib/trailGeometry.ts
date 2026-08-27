@@ -133,15 +133,29 @@ export function buildPastSegments(
   return segments;
 }
 
-/** The path the aim is about to take over the window starting at tNow. */
+/**
+ * The path the aim is about to take over the window starting at tNow.
+ *
+ * clampEndMs ends the window early - at the end of the flick in progress.
+ * Without it the window keeps running past the target and into the start of
+ * the next flick, which draws as the line sailing past the target the
+ * player is actually about to hit. Measured on a 480 ms kill cadence the
+ * line reached 1.5x to 2.3x beyond the target that way; clipped at the
+ * kill, it lands on it exactly.
+ */
 export function buildFutureSegments(
   trace: TraceLookup,
   tNow: number,
   model: ScreenModel,
   windowMs = FUTURE_WINDOW_MS,
+  clampEndMs?: number,
 ): TrailSegment[] {
   const now = trace.interpXY(tNow);
-  const { from, to } = trace.range(tNow, Math.min(trace.t1, tNow + windowMs));
+  const windowEnd = Math.min(
+    tNow + windowMs,
+    clampEndMs ?? Number.POSITIVE_INFINITY,
+  );
+  const { from, to } = trace.range(tNow, Math.min(trace.t1, windowEnd));
 
   const segments: TrailSegment[] = [];
   let current: TrailSegment = [{ x: model.cx, y: model.cy }];

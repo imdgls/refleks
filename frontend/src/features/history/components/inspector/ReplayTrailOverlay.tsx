@@ -16,6 +16,7 @@ import {
   buildFutureSegments,
   buildPastSegments,
   drawSegments,
+  FUTURE_WINDOW_MS,
   TraceLookup,
 } from "../../lib/trailGeometry";
 import type { TrailMode } from "../../lib/trailGeometry";
@@ -214,11 +215,23 @@ export function ReplayTrailOverlay({
       // not split part-way along its length.
       const colour = colourMap?.colourAt(traceMs) ?? NEUTRAL_TRAIL_COLOR;
 
+      // End the "about to happen" trail at the flick in progress rather than
+      // letting a fixed window run on into the next one. Where there are no
+      // flicks to speak of - a tracking scenario, a beam weapon - there is
+      // nothing to clip against and the plain window is the honest answer.
+      const flickEnd = colourMap?.nextKillEndMs(traceMs) ?? undefined;
+
       if (TRAIL_MODE === "past" || TRAIL_MODE === "past+future") {
         if (TRAIL_MODE === "past+future") {
           drawSegments(
             ctx,
-            buildFutureSegments(trace, traceMs, model),
+            buildFutureSegments(
+              trace,
+              traceMs,
+              model,
+              FUTURE_WINDOW_MS,
+              flickEnd,
+            ),
             colour,
             TRAIL_LINE_WIDTH,
             FUTURE_ALPHA,
@@ -233,7 +246,7 @@ export function ReplayTrailOverlay({
       } else {
         drawSegments(
           ctx,
-          buildFutureSegments(trace, traceMs, model),
+          buildFutureSegments(trace, traceMs, model, FUTURE_WINDOW_MS, flickEnd),
           colour,
           TRAIL_LINE_WIDTH,
         );

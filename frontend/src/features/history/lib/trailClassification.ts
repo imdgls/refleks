@@ -123,6 +123,7 @@ type FlickSpan = {
 export class KillColourMap {
   private readonly spans: FlickSpan[];
   private readonly starts: number[];
+  private readonly ends: number[];
   private readonly toleranceMs: number;
 
   /**
@@ -142,6 +143,7 @@ export class KillColourMap {
       }))
       .sort((a, b) => a.start - b.start);
     this.starts = this.spans.map((span) => span.start);
+    this.ends = this.spans.map((span) => span.end).sort((a, b) => a - b);
   }
 
   get isEmpty(): boolean {
@@ -173,5 +175,27 @@ export class KillColourMap {
   colourAt(ts: number, fallback = NEUTRAL_TRAIL_COLOR): string {
     const classification = this.classificationAt(ts);
     return classification ? CLASSIFICATION_COLORS[classification] : fallback;
+  }
+
+  /**
+   * When the flick in progress at ts ends, i.e. the next kill at or after
+   * it. Null once the last kill has passed.
+   *
+   * This is what bounds the "about to happen" trail. A fixed window keeps
+   * running past the target and into the beginning of the next flick, which
+   * draws as the line sailing past the target the player is actually about
+   * to hit - real mouse movement, but movement belonging to the next kill.
+   * On a 480 ms kill cadence a 300 ms window reached 1.5x to 2.3x beyond
+   * the target; ending it at the kill lands the line on it exactly.
+   */
+  nextKillEndMs(ts: number): number | null {
+    let lo = 0;
+    let hi = this.ends.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.ends[mid] < ts) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo < this.ends.length ? this.ends[lo] : null;
   }
 }
