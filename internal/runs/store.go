@@ -251,6 +251,7 @@ func (s *Store) DeleteReplay(runFilePath string) error {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) && firstErr == nil {
 			firstErr = err
 		}
+		_ = os.Remove(ReplaySyncPath(path))
 	}
 	return firstErr
 }

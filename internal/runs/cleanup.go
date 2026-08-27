@@ -119,6 +119,7 @@ func removeReplayFile(ctx context.Context, path string) bool {
 		runtime.LogWarningf(ctx, "replay cleanup: remove %s: %v", path, err)
 		return false
 	}
+	_ = os.Remove(ReplaySyncPath(path))
 	return true
 }
 

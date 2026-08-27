@@ -416,6 +416,8 @@ func (s *Store) trimScreenRecording(trim pendingScreenTrim, paths []string, firs
 	}
 	_ = os.Remove(backupPath)
 
+	s.writeReplaySync(outPath, trim, firstSegmentStartMs)
+
 	runtime.LogInfof(s.ctx, "screen/trim: saved replay for %s at %s", trim.runFileName, outPath)
 	return nil
 }
