@@ -16,7 +16,9 @@ import {
   buildFutureSegments,
   buildPastSegments,
   drawSegments,
+  findShotTimes,
   FUTURE_WINDOW_MS,
+  nextShotAfter,
   TraceLookup,
 } from "../../lib/trailGeometry";
 import type { TrailMode } from "../../lib/trailGeometry";
@@ -59,6 +61,12 @@ const TRAIL_MODE: TrailMode = "future";
  * flick's colour by about a frame.
  */
 const FLICK_END_TOLERANCE_MS = 1000 / 30;
+
+/**
+ * Below this many shots there is no shooting rhythm to bound the trail
+ * against, so the plain window is used instead.
+ */
+const MIN_SHOTS_TO_CLAMP = 5;
 
 function findRunByFilePath(
   sessions: { items: RunRecord[] }[],
@@ -143,6 +151,14 @@ export function ReplayTrailOverlay({
     [points],
   );
 
+  // Shots bound the upcoming trail. A run with no discrete shooting - a
+  // tracking scenario, or a beam weapon held down - yields none, and the
+  // plain window stands, since there is no arrival to stop at either.
+  const shots = useMemo(() => {
+    const found = points ? findShotTimes(points) : [];
+    return found.length >= MIN_SHOTS_TO_CLAMP ? found : null;
+  }, [points]);
+
   // The classification is the app's own, not a second implementation of it,
   // so a colour here means exactly what the same label means in the trace tab.
   const analysis = useMemo(() => {
@@ -215,11 +231,10 @@ export function ReplayTrailOverlay({
       // not split part-way along its length.
       const colour = colourMap?.colourAt(traceMs) ?? NEUTRAL_TRAIL_COLOR;
 
-      // End the "about to happen" trail at the flick in progress rather than
-      // letting a fixed window run on into the next one. Where there are no
-      // flicks to speak of - a tracking scenario, a beam weapon - there is
-      // nothing to clip against and the plain window is the honest answer.
-      const flickEnd = colourMap?.nextKillEndMs(traceMs) ?? undefined;
+      // End the "about to happen" trail at the next shot: the moment the
+      // player judged themselves on target. Past it the window is drawing
+      // the start of the next flick.
+      const flickEnd = shots ? nextShotAfter(shots, traceMs) : undefined;
 
       if (TRAIL_MODE === "past" || TRAIL_MODE === "past+future") {
         if (TRAIL_MODE === "past+future") {
@@ -255,7 +270,7 @@ export function ReplayTrailOverlay({
 
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
-  }, [trace, sync, run, videoRef, manualOffsetMs, colourMap]);
+  }, [trace, sync, run, videoRef, manualOffsetMs, colourMap, shots]);
 
   if (!trace || !sync) return null;
 

@@ -134,14 +134,51 @@ export function buildPastSegments(
 }
 
 /**
+ * Rising edges of the left mouse button: the moments shots were fired.
+ *
+ * This is the one boundary in the data that needs no threshold and no
+ * inference. It is also the moment the player judged themselves on target,
+ * which is exactly where the "about to happen" trail should stop - a window
+ * that runs on past it is drawing the beginning of the next flick.
+ *
+ * Kill events are not usable for this. Measured against the shots on a
+ * 116-kill run, a kill is logged a median 122 ms after the trigger pull and
+ * anywhere from 43 to 246 ms after it, so clipping there variously cuts a
+ * flick short or lets the next one leak in.
+ */
+export function findShotTimes(points: MousePoint[]): number[] {
+  const shots: number[] = [];
+  let wasDown = false;
+  for (const point of points) {
+    const down = ((point.buttons ?? 0) & 1) !== 0;
+    if (down && !wasDown) shots.push(point.ts);
+    wasDown = down;
+  }
+  return shots;
+}
+
+/** The first shot at or after ts, or undefined once shooting has finished. */
+export function nextShotAfter(
+  shots: number[],
+  ts: number,
+): number | undefined {
+  let lo = 0;
+  let hi = shots.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (shots[mid] < ts) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < shots.length ? shots[lo] : undefined;
+}
+
+/**
  * The path the aim is about to take over the window starting at tNow.
  *
- * clampEndMs ends the window early - at the end of the flick in progress.
- * Without it the window keeps running past the target and into the start of
- * the next flick, which draws as the line sailing past the target the
- * player is actually about to hit. Measured on a 480 ms kill cadence the
- * line reached 1.5x to 2.3x beyond the target that way; clipped at the
- * kill, it lands on it exactly.
+ * clampEndMs ends the window early - at the next shot. Without it the
+ * window keeps running past the target and into the start of the next
+ * flick, drawing real mouse movement that belongs to the next kill as
+ * though it were part of the current approach.
  */
 export function buildFutureSegments(
   trace: TraceLookup,
