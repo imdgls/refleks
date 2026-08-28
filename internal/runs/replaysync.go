@@ -3,6 +3,7 @@ package runs
 import (
 	"encoding/json"
 	"os"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -69,6 +70,56 @@ type ReplaySync struct {
 	// SegmentSeconds is the segment length in force when this replay was
 	// trimmed, which bounds how much pre-roll Frame0EpochMs can represent.
 	SegmentSeconds int `json:"segmentSeconds"`
+
+	// Frame0Source says where Frame0EpochMs came from.
+	//
+	//	"captured" - read from the times at which frames were actually handed
+	//	             to the encoder, and accurate to a frame
+	//	"assumed"  - derived from the session start and the segment's media
+	//	             offset, which ignores both the encoder's startup delay
+	//	             and any slippage between media time and the wall clock.
+	//	             Measured error on this pairing ranged from 30 to 251 ms.
+	//
+	// A consumer that cares about frame-accurate alignment should treat
+	// "assumed" as approximate and let the viewer nudge it.
+	Frame0Source string `json:"frame0Source"`
+}
+
+const (
+	// Frame0SourceCaptured means the time came from the capture's own record.
+	Frame0SourceCaptured = "captured"
+	// Frame0SourceAssumed means it was inferred from the session start.
+	Frame0SourceAssumed = "assumed"
+)
+
+// frameClockProvider is implemented by capture backends that record when each
+// frame was handed to the encoder. Declared here as an optional interface so
+// a backend without frame-level timing needs no stub, and so the screen
+// provider's own interface stays untouched.
+type frameClockProvider interface {
+	FrameWallClock(media time.Duration) (time.Time, bool)
+}
+
+// frame0For resolves when a replay's first frame was captured.
+//
+// The media timeline ffmpeg writes is frame-index based: it stamps frame n
+// at n/fps whatever the clock says, so it neither starts when the session
+// was recorded as starting nor keeps pace with it if the capture falls
+// behind the nominal rate. Asking the capture when it actually sent that
+// frame sidesteps both. Where that is unavailable the old derivation stands,
+// flagged as assumed so the imprecision travels with the data.
+func (s *Store) frame0For(trim pendingScreenTrim, firstSegmentStart time.Duration) (int64, string) {
+	s.screenMu.Lock()
+	provider := s.screenProvider
+	s.screenMu.Unlock()
+
+	if clock, ok := provider.(frameClockProvider); ok {
+		if at, ok := clock.FrameWallClock(firstSegmentStart); ok {
+			return at.UnixMilli(), Frame0SourceCaptured
+		}
+	}
+	return trim.sessionStart.UnixMilli() + firstSegmentStart.Milliseconds(),
+		Frame0SourceAssumed
 }
 
 // PreRollMs is how much footage precedes the run itself.
@@ -87,7 +138,8 @@ func ReplaySyncPath(replayPath string) string {
 //
 // Written via a temporary file and a rename so a reader can never observe a
 // half-written sidecar.
-func (s *Store) writeReplaySync(replayPath string, trim pendingScreenTrim, frame0EpochMs int64) {
+func (s *Store) writeReplaySync(replayPath string, trim pendingScreenTrim, firstSegmentStart time.Duration) {
+	frame0EpochMs, source := s.frame0For(trim, firstSegmentStart)
 	data := ReplaySync{
 		Version:             ReplaySyncVersion,
 		Frame0EpochMs:       frame0EpochMs,
@@ -96,6 +148,7 @@ func (s *Store) writeReplaySync(replayPath string, trim pendingScreenTrim, frame
 		ReplayEndEpochMs:    trim.replayEnd.UnixMilli(),
 		SessionStartEpochMs: trim.sessionStart.UnixMilli(),
 		SegmentSeconds:      constants.ScreenCaptureSegmentSeconds,
+		Frame0Source:        source,
 	}
 
 	encoded, err := json.MarshalIndent(data, "", "  ")
@@ -116,8 +169,8 @@ func (s *Store) writeReplaySync(replayPath string, trim pendingScreenTrim, frame
 		return
 	}
 
-	runtime.LogInfof(s.ctx, "screen/sync: %s starts at epoch %d (%d ms of pre-roll before the run)",
-		trim.runFileName, data.Frame0EpochMs, data.PreRollMs())
+	runtime.LogInfof(s.ctx, "screen/sync: %s starts at epoch %d (%s, %d ms of pre-roll before the run)",
+		trim.runFileName, data.Frame0EpochMs, data.Frame0Source, data.PreRollMs())
 }
 
 // ReadReplaySync loads a replay's sidecar. A replay without one, or with a

@@ -80,6 +80,7 @@ type captureWin struct {
 	rawStdin io.WriteCloser
 	segDir   string
 	started  time.Time
+	frames   frameClock
 
 	dev     uintptr
 	d3dCtx  uintptr
@@ -421,6 +422,7 @@ func (c *captureWin) Start() error {
 	c.rawStdin = rawStdin
 	c.segDir = segDir
 	c.started = time.Now()
+	c.frames.reset(c.fps)
 	doneCh := make(chan struct{})
 	captureDoneCh := make(chan struct{})
 	writerDoneCh := make(chan struct{})
@@ -1012,6 +1014,7 @@ func (c *captureWin) pipeWriter(pipeCh <-chan []byte, freeFrames chan<- []byte, 
 			}
 			buf = buf[n:]
 		}
+		c.frames.mark(time.Now())
 		c.mu.Lock()
 		if c.running {
 			c.lastFrameAt = time.Now()
