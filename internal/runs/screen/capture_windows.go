@@ -422,7 +422,7 @@ func (c *captureWin) Start() error {
 	c.rawStdin = rawStdin
 	c.segDir = segDir
 	c.started = time.Now()
-	c.frames.reset(c.fps)
+	c.frames.reset(c.fps, c.started)
 	doneCh := make(chan struct{})
 	captureDoneCh := make(chan struct{})
 	writerDoneCh := make(chan struct{})

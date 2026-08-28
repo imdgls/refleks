@@ -97,7 +97,7 @@ const (
 // a backend without frame-level timing needs no stub, and so the screen
 // provider's own interface stays untouched.
 type frameClockProvider interface {
-	FrameWallClock(media time.Duration) (time.Time, bool)
+	FrameWallClock(session time.Time, media time.Duration) (time.Time, bool)
 }
 
 // frame0For resolves when a replay's first frame was captured.
@@ -114,7 +114,7 @@ func (s *Store) frame0For(trim pendingScreenTrim, firstSegmentStart time.Duratio
 	s.screenMu.Unlock()
 
 	if clock, ok := provider.(frameClockProvider); ok {
-		if at, ok := clock.FrameWallClock(firstSegmentStart); ok {
+		if at, ok := clock.FrameWallClock(trim.sessionStart, firstSegmentStart); ok {
 			return at.UnixMilli(), Frame0SourceCaptured
 		}
 	}
