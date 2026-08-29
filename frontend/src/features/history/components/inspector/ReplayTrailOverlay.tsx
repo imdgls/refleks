@@ -47,11 +47,12 @@ const TRAIL_LINE_WIDTH = 2;
 const FUTURE_ALPHA = 0.33;
 
 /**
- * Matches the mode the standalone renderer settled on: the path the aim is
- * about to take reads far better on a flick than the path it already took.
+ * The path already taken, streaming out behind the crosshair. Unlike the
+ * upcoming path, which is anchored in the world and so appears to stand
+ * still while the crosshair travels along it, this one moves with the aim.
  * Slow motion and a control for this arrive in later steps.
  */
-const TRAIL_MODE: TrailMode = "future";
+const TRAIL_MODE: TrailMode = "past";
 
 /**
  * One frame at the default capture rate. A flick's span ends at the kill's
@@ -189,15 +190,20 @@ export function ReplayTrailOverlay({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let frame = 0;
-    let lastTime = Number.NaN;
+    let lastMediaTime = Number.NaN;
     let lastWidth = 0;
     let lastHeight = 0;
     let model: ScreenModel | null = null;
 
-    const draw = () => {
-      frame = requestAnimationFrame(draw);
-
+    /**
+     * time is the media timestamp of the frame being shown, not the
+     * element's playback position. The two are not the same thing:
+     * currentTime advances continuously with the media clock, so drawing
+     * from it moves the trail on while the picture is still holding the
+     * previous frame. That is invisible at full speed, where both change
+     * together, and reads as stutter as soon as playback is slowed down.
+     */
+    const draw = (time: number) => {
       const width = video.clientWidth;
       const height = video.clientHeight;
       if (width <= 0 || height <= 0) return;
@@ -216,9 +222,7 @@ export function ReplayTrailOverlay({
         lastHeight = height;
       }
 
-      const time = video.currentTime;
-      if (!resized && time === lastTime) return;
-      lastTime = time;
+      lastMediaTime = time;
 
       ctx.clearRect(0, 0, width, height);
       if (!model) return;
@@ -268,8 +272,40 @@ export function ReplayTrailOverlay({
       }
     };
 
-    frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
+    // requestVideoFrameCallback fires once per frame the compositor actually
+    // presents, and hands over that frame's own media timestamp. Where it is
+    // missing, an animation frame loop reading currentTime is the best
+    // available approximation - the behaviour this replaced.
+    let vfcHandle = 0;
+    let rafHandle = 0;
+    if (typeof video.requestVideoFrameCallback === "function") {
+      const onPresented: VideoFrameRequestCallback = (_now, metadata) => {
+        draw(metadata.mediaTime);
+        vfcHandle = video.requestVideoFrameCallback(onPresented);
+      };
+      vfcHandle = video.requestVideoFrameCallback(onPresented);
+    } else {
+      const tick = () => {
+        rafHandle = requestAnimationFrame(tick);
+        const time = video.currentTime;
+        if (time !== lastMediaTime) draw(time);
+      };
+      rafHandle = requestAnimationFrame(tick);
+    }
+
+    // Paint at once so a paused replay is not blank until the next frame is
+    // presented, and repaint on a resize, which presents no new frame at all.
+    draw(video.currentTime);
+    const observer = new ResizeObserver(() => {
+      draw(Number.isFinite(lastMediaTime) ? lastMediaTime : video.currentTime);
+    });
+    observer.observe(video);
+
+    return () => {
+      if (vfcHandle) video.cancelVideoFrameCallback?.(vfcHandle);
+      if (rafHandle) cancelAnimationFrame(rafHandle);
+      observer.disconnect();
+    };
   }, [trace, sync, run, videoRef, manualOffsetMs, colourMap, shots]);
 
   if (!trace || !sync) return null;

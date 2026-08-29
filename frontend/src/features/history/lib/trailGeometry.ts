@@ -209,6 +209,62 @@ export function buildFutureSegments(
   return segments;
 }
 
+/**
+ * Centripetal Catmull-Rom, as the exponent on the distance between knots.
+ * At 0.5 the spline cannot form a cusp or a loop however unevenly the
+ * samples are spaced, which matters here: the trace is sampled about every
+ * 8 ms, so at flick speed consecutive points can be 45 px apart while
+ * during a dwell they pile up on top of each other.
+ */
+const SMOOTHING_ALPHA = 0.5;
+const SMOOTHING_EPSILON = 1e-6;
+
+function knotSpacing(a: ScreenPoint, b: ScreenPoint): number {
+  return Math.pow(Math.hypot(b.x - a.x, b.y - a.y), SMOOTHING_ALPHA);
+}
+
+/**
+ * The two cubic control points for the span p1..p2, given its neighbours.
+ *
+ * The curve passes exactly through every sample: this rounds the corners
+ * between measured points, it does not move them or add motion between
+ * them. What it removes is the faceting that comes of joining samples 45 px
+ * apart with straight lines, which is invisible at full speed and obvious
+ * slowed down.
+ */
+function splineControls(
+  p0: ScreenPoint,
+  p1: ScreenPoint,
+  p2: ScreenPoint,
+  p3: ScreenPoint,
+): [ScreenPoint, ScreenPoint] {
+  const d1 = knotSpacing(p0, p1);
+  const d2 = knotSpacing(p1, p2);
+  const d3 = knotSpacing(p2, p3);
+
+  let c1 = p1;
+  if (d1 > SMOOTHING_EPSILON && d1 + d2 > SMOOTHING_EPSILON) {
+    const n = 3 * d1 * (d1 + d2);
+    const w = 2 * d1 * d1 + 3 * d1 * d2 + d2 * d2;
+    c1 = {
+      x: (d1 * d1 * p2.x - d2 * d2 * p0.x + w * p1.x) / n,
+      y: (d1 * d1 * p2.y - d2 * d2 * p0.y + w * p1.y) / n,
+    };
+  }
+
+  let c2 = p2;
+  if (d3 > SMOOTHING_EPSILON && d3 + d2 > SMOOTHING_EPSILON) {
+    const n = 3 * d3 * (d3 + d2);
+    const w = 2 * d3 * d3 + 3 * d3 * d2 + d2 * d2;
+    c2 = {
+      x: (d3 * d3 * p1.x - d2 * d2 * p3.x + w * p2.x) / n,
+      y: (d3 * d3 * p1.y - d2 * d2 * p3.y + w * p2.y) / n,
+    };
+  }
+
+  return [c1, c2];
+}
+
 export function drawSegments(
   ctx: CanvasRenderingContext2D,
   segments: TrailSegment[],
@@ -227,8 +283,17 @@ export function drawSegments(
     if (segment.length < 2) continue;
     ctx.beginPath();
     ctx.moveTo(segment[0].x, segment[0].y);
-    for (let i = 1; i < segment.length; i++) {
-      ctx.lineTo(segment[i].x, segment[i].y);
+    if (segment.length === 2) {
+      ctx.lineTo(segment[1].x, segment[1].y);
+    } else {
+      for (let i = 0; i < segment.length - 1; i++) {
+        const p0 = i > 0 ? segment[i - 1] : segment[i];
+        const p1 = segment[i];
+        const p2 = segment[i + 1];
+        const p3 = i + 2 < segment.length ? segment[i + 2] : p2;
+        const [c1, c2] = splineControls(p0, p1, p2, p3);
+        ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, p2.x, p2.y);
+      }
     }
     ctx.stroke();
   }
