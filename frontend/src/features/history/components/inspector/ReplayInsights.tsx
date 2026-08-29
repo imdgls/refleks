@@ -67,6 +67,15 @@ export function ReplayInsights({
     return (timeSec: number) => seek(map(timeSec));
   }, [insights.toVideoSeconds, seek]);
 
+  // A chart is a few hundred pixels wide for a minute of play, so a step
+  // finer than this cannot move the marker a whole pixel. Quantising here
+  // keeps the charts from re-rendering several times for the same drawing.
+  const chartPlayhead = useMemo(() => {
+    const map = insights.fromVideoSeconds;
+    if (!map) return null;
+    return Math.round(map(position) / 0.15) * 0.15;
+  }, [insights.fromVideoSeconds, position]);
+
   if (insights.loading) return null;
 
   const hasFlicks = insights.flicks.length > 0;
@@ -105,7 +114,11 @@ export function ReplayInsights({
             <div className="grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-3">
               {hasTtk && (
                 <Labelled label="TTK">
-                  <TtkMiniChart data={insights.ttk} onSeek={seekFromChart} />
+                  <TtkMiniChart
+                    data={insights.ttk}
+                    onSeek={seekFromChart}
+                    playhead={chartPlayhead}
+                  />
                 </Labelled>
               )}
               {hasAccuracy && (
@@ -113,6 +126,7 @@ export function ReplayInsights({
                   <AccuracyMiniChart
                     data={insights.accuracy}
                     onSeek={seekFromChart}
+                    playhead={chartPlayhead}
                   />
                 </Labelled>
               )}

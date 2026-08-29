@@ -49,6 +49,8 @@ export type ReplayInsights = {
   accuracy: Array<{ timeSec: number; accOverTime: number }>;
   /** Converts a chart's elapsed seconds to seconds into the video. */
   toVideoSeconds: ((timeSec: number) => number) | null;
+  /** The same mapping the other way, for placing playback on a chart. */
+  fromVideoSeconds: ((videoSeconds: number) => number) | null;
   runDurationSeconds: number;
 };
 
@@ -60,6 +62,7 @@ const EMPTY: ReplayInsights = {
   ttk: [],
   accuracy: [],
   toVideoSeconds: null,
+  fromVideoSeconds: null,
   runDurationSeconds: 0,
 };
 
@@ -168,6 +171,11 @@ export function useReplayInsights(
       anchorMs !== null
         ? (timeSec: number) => (anchorMs + timeSec * 1000 - frame0) / 1000
         : null;
+    const fromVideoSeconds =
+      anchorMs !== null
+        ? (videoSeconds: number) =>
+            (videoSeconds * 1000 + frame0 - anchorMs) / 1000
+        : null;
 
     const accuracy = (charts?.events ?? [])
       .filter((p): p is typeof p & { accOverTime: number } =>
@@ -183,6 +191,7 @@ export function useReplayInsights(
       ttk: charts?.ttk ?? [],
       accuracy,
       toVideoSeconds,
+      fromVideoSeconds,
       runDurationSeconds: charts?.eventsDomainMax ?? 0,
     };
   }, [run, points, events, perf, sync]);

@@ -5,7 +5,15 @@ import {
   ChartTooltipContent,
 } from "@/shared/components/ui/chart";
 import { CHART_SERIES_COLORS, CHART_STYLE, useI18n } from "@/shared/lib";
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { memo } from "react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 /**
  * Slimmer siblings of the analysis tab's charts, sized for the space under
@@ -44,14 +52,53 @@ const AXIS = {
   tickMargin: 6,
 } as const;
 
-export function TtkMiniChart({
+/**
+ * Where the playback marker belongs, or null if it does not belong here.
+ *
+ * A position outside the plotted range would be pinned to an edge and read
+ * as though playback were parked there, which is worse than showing
+ * nothing: these charts cover the run, while the replay also holds the
+ * segment pre-roll ahead of it and a tail behind.
+ *
+ * Returned as a value rather than a component because Recharts identifies
+ * its children by type, and a ReferenceLine wrapped in anything of our own
+ * never reaches the axes it needs.
+ */
+function playheadAt(
+  at: number | null | undefined,
+  data: Array<Record<string, unknown>>,
+): number | null {
+  if (at === null || at === undefined || !Number.isFinite(at)) return null;
+  let lo = Number.POSITIVE_INFINITY;
+  let hi = Number.NEGATIVE_INFINITY;
+  for (const row of data) {
+    const t = Number(row.timeSec);
+    if (!Number.isFinite(t)) continue;
+    if (t < lo) lo = t;
+    if (t > hi) hi = t;
+  }
+  if (lo > hi) return null;
+  return at >= lo && at <= hi ? at : null;
+}
+
+const PLAYHEAD = {
+  stroke: "var(--foreground)",
+  strokeWidth: 1,
+  strokeOpacity: 0.65,
+  isFront: true,
+} as const;
+
+export const TtkMiniChart = memo(function TtkMiniChart({
   data,
   onSeek,
+  playhead,
 }: {
   data: Array<Record<string, unknown>>;
   onSeek: ((timeSec: number) => void) | null;
+  playhead: number | null;
 }) {
   const { t } = useI18n();
+  const marker = playheadAt(playhead, data);
   const config: ChartConfig = {
     realTTK: {
       label: t("history.analysis.chart.ttk"),
@@ -79,6 +126,7 @@ export function TtkMiniChart({
         />
         <YAxis width={34} tickFormatter={(v) => `${v}s`} {...AXIS} />
         <ChartTooltip content={<ChartTooltipContent />} />
+        {marker !== null && <ReferenceLine x={marker} {...PLAYHEAD} />}
         <Line
           isAnimationActive={false}
           type="monotone"
@@ -98,16 +146,19 @@ export function TtkMiniChart({
       </LineChart>
     </ChartContainer>
   );
-}
+});
 
-export function AccuracyMiniChart({
+export const AccuracyMiniChart = memo(function AccuracyMiniChart({
   data,
   onSeek,
+  playhead,
 }: {
   data: Array<{ timeSec: number; accOverTime: number }>;
   onSeek: ((timeSec: number) => void) | null;
+  playhead: number | null;
 }) {
   const { t } = useI18n();
+  const marker = playheadAt(playhead, data);
   const config: ChartConfig = {
     accOverTime: {
       label: t("history.analysis.chart.accuracy"),
@@ -136,6 +187,7 @@ export function AccuracyMiniChart({
           {...AXIS}
         />
         <ChartTooltip content={<ChartTooltipContent />} />
+        {marker !== null && <ReferenceLine x={marker} {...PLAYHEAD} />}
         <Line
           isAnimationActive={false}
           type="monotone"
@@ -147,4 +199,4 @@ export function AccuracyMiniChart({
       </LineChart>
     </ChartContainer>
   );
-}
+});
