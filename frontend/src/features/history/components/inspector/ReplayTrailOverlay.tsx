@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { decodeTrace } from "../../lib/decodeTrace";
 import { computeMouseTraceAnalysis } from "../../lib/mouseAnalysis";
+import { registerReplayPlayer } from "../../lib/replayPlayback";
 import { fetchReplaySync, videoTimeToTraceEpochMs } from "../../lib/replaySync";
 import type { ReplaySync } from "../../lib/replaySync";
 import {
@@ -70,6 +71,7 @@ const STORE_PAST_ON = "refleks.trail.past.enabled";
 const STORE_PAST_ALPHA = "refleks.trail.past.opacity";
 const STORE_FUTURE_ON = "refleks.trail.future.enabled";
 const STORE_FUTURE_ALPHA = "refleks.trail.future.opacity";
+const STORE_COLOURS = "refleks.trail.classificationColours";
 
 /**
  * One frame at the default capture rate. A flick's span ends at the kill's
@@ -117,6 +119,7 @@ export function ReplayTrailOverlay({
     STORE_FUTURE_ALPHA,
     0.33,
   );
+  const [coloursOn, setColoursOn] = usePersistedState(STORE_COLOURS, true);
   const sessions = useStore((state) => state.sessions);
   const run = useMemo(
     () => findRunByFilePath(sessions, filePath),
@@ -257,7 +260,9 @@ export function ReplayTrailOverlay({
       // The whole trail takes one colour: the flick its head is in. A trail
       // spanning a boundary is coloured by the flick currently being flown,
       // not split part-way along its length.
-      const colour = colourMap?.colourAt(traceMs) ?? NEUTRAL_TRAIL_COLOR;
+      const colour = coloursOn
+        ? (colourMap?.colourAt(traceMs) ?? NEUTRAL_TRAIL_COLOR)
+        : NEUTRAL_TRAIL_COLOR;
 
       // End the "about to happen" trail at the next shot: the moment the
       // player judged themselves on target. Past it the window is drawing
@@ -332,7 +337,17 @@ export function ReplayTrailOverlay({
     pastAlpha,
     futureOn,
     futureAlpha,
+    coloursOn,
   ]);
+
+  // Share the element with the panels drawn under the replay. Registered
+  // whatever the trail can do, since they need the player even for a run
+  // this overlay cannot draw on.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !filePath) return;
+    return registerReplayPlayer(filePath, video);
+  }, [videoRef, filePath]);
 
   if (!trace || !sync) return null;
 
@@ -372,6 +387,13 @@ export function ReplayTrailOverlay({
               opacity={futureAlpha}
               onOpacity={setFutureAlpha}
             />
+            <label className="flex items-center gap-2 border-t border-surface-border pt-3 text-sm">
+              <Checkbox
+                checked={coloursOn}
+                onCheckedChange={(v) => setColoursOn(v === true)}
+              />
+              <span>Classification colours</span>
+            </label>
           </PopoverContent>
         </Popover>
       </div>

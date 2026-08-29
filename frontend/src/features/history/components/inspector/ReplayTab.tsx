@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HistoryRun } from "../../lib/historyModels";
+import { ReplayInsights } from "./ReplayInsights";
 import { ReplayTrailOverlay } from "./ReplayTrailOverlay";
 
 type Props = {
@@ -217,6 +218,7 @@ export function ReplayTab({ primaryRun, compareRun }: Props) {
             waiting={primaryWaiting}
             status={primaryStatus}
             label={t("history.inspector.primary")}
+            primary
             onDeleted={() => setPrimaryReplay(null)}
           />
           <ReplaySlot
@@ -242,6 +244,7 @@ export function ReplayTab({ primaryRun, compareRun }: Props) {
           }
           waiting={primaryWaiting}
           status={primaryStatus}
+          primary
           onDeleted={() => setPrimaryReplay(null)}
         />
       )}
@@ -257,6 +260,7 @@ function ReplaySlot({
   waiting,
   status,
   label,
+  primary,
   onDeleted,
 }: {
   filePath: string;
@@ -264,6 +268,9 @@ function ReplaySlot({
   waiting: boolean;
   status: ReplayStatus | null;
   label?: string;
+  // Only the primary run carries the panels. A compare view is for looking
+  // at two runs beside each other, not for analysing both at once.
+  primary?: boolean;
   onDeleted: () => void;
 }) {
   const [fullscreen, setFullscreen] = useState(false);
@@ -305,17 +312,20 @@ function ReplaySlot({
     }
 
     return (
-      <VideoPlayer
-        key={path}
-        path={path}
-        filePath={filePath}
-        label={label}
-        onDeleted={onDeleted}
-        onExpand={(time) => {
-          setFullscreenTime(time);
-          setFullscreen(true);
-        }}
-      />
+      <div className="space-y-2">
+        <VideoPlayer
+          key={path}
+          path={path}
+          filePath={filePath}
+          label={label}
+          onDeleted={onDeleted}
+          onExpand={(time) => {
+            setFullscreenTime(time);
+            setFullscreen(true);
+          }}
+        />
+        {primary && <ReplayInsights filePath={filePath} replayUrl={path} />}
+      </div>
     );
   }
 
@@ -646,9 +656,10 @@ function VideoPlayer({
               }
               if (Number.isFinite(v.duration)) {
                 setDuration(v.duration);
-              } else {
-                loadInfo();
               }
+              // The frame rate sizes the scrubber's keyboard step, so it is
+              // wanted whether or not the duration came through.
+              loadInfo();
               if (initialSeekRef.current > 0 && Number.isFinite(v.duration)) {
                 seekingRef.current = true;
                 v.currentTime = Math.min(initialSeekRef.current, v.duration);
@@ -706,7 +717,7 @@ function VideoPlayer({
             value={[currentTime]}
             min={0}
             max={Number.isFinite(duration) && duration > 0 ? duration : 1}
-            step={0.1}
+            step={info?.fps && info.fps > 0 ? 1 / info.fps : 0.1}
             aria-label={t("history.replay.playbackPosition")}
             onValueChange={([v]) => {
               // Keep dragging purely UI-local. Seeking on every pointer move
