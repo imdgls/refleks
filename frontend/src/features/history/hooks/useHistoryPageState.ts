@@ -7,6 +7,7 @@ import {
   matchSessionSearch,
   readSessionDurationMs,
 } from "../lib/historyModels";
+import { useAutoSelectLatestReplay } from "../lib/autoSelectReplay";
 import type { InspectorTab } from "../lib/inspectorTabs";
 
 export type RunSortKey =
@@ -76,6 +77,16 @@ export function useHistoryPageState() {
     () => new Map(allRuns.map((run) => [run.id, run])),
     [allRuns],
   );
+
+  // Bring a freshly trimmed replay forward while the window is in the
+  // background, so it is already open on returning from the game.
+  useAutoSelectLatestReplay({
+    runs: allRuns,
+    setSelectedSessionId,
+    setPrimaryRunId,
+    setInspectorTab,
+    setRunInspectorOpen,
+  });
 
   const globalPbByScenario = useMemo(() => {
     const map = new Map<string, (typeof allRuns)[0]>();

@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { decodeTrace } from "../../lib/decodeTrace";
 import { computeMouseTraceAnalysis } from "../../lib/mouseAnalysis";
+import { STORE_AUTO_SELECT } from "../../lib/autoSelectReplay";
 import { registerReplayPlayer } from "../../lib/replayPlayback";
 import { fetchReplaySync, videoTimeToTraceEpochMs } from "../../lib/replaySync";
 import type { ReplaySync } from "../../lib/replaySync";
@@ -120,6 +121,7 @@ export function ReplayTrailOverlay({
     0.33,
   );
   const [coloursOn, setColoursOn] = usePersistedState(STORE_COLOURS, true);
+  const [autoSelect, setAutoSelect] = usePersistedState(STORE_AUTO_SELECT, true);
   const sessions = useStore((state) => state.sessions);
   const run = useMemo(
     () => findRunByFilePath(sessions, filePath),
@@ -394,6 +396,19 @@ export function ReplayTrailOverlay({
               />
               <span>Classification colours</span>
             </label>
+            <div className="space-y-1 border-t border-surface-border pt-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={autoSelect}
+                  onCheckedChange={(v) => setAutoSelect(v === true)}
+                />
+                <span>Open new replays</span>
+              </label>
+              <p className="pl-6 text-[0.6875rem] leading-tight text-surface-muted-foreground">
+                Selects a run once its replay is ready, but only while this
+                window is in the background.
+              </p>
+            </div>
           </PopoverContent>
         </Popover>
       </div>
