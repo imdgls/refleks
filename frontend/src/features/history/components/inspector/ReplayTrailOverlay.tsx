@@ -1,5 +1,14 @@
-import { useStore } from "@/shared/hooks";
+import {
+  Button,
+  Checkbox,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Slider,
+} from "@/shared/components";
+import { usePersistedState, useStore } from "@/shared/hooks";
 import { getRunStatsEvents, getRunTrace } from "@/shared/lib/api";
+import { Spline } from "lucide-react";
 import type { MousePoint, RunRecord, RunStatsEvent } from "@/shared/types/ipc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -21,7 +30,6 @@ import {
   nextShotAfter,
   TraceLookup,
 } from "../../lib/trailGeometry";
-import type { TrailMode } from "../../lib/trailGeometry";
 import { screenModelFromSummary } from "../../lib/trailProjection";
 import type { ScreenModel } from "../../lib/trailProjection";
 
@@ -44,15 +52,24 @@ import type { ScreenModel } from "../../lib/trailProjection";
  */
 
 const TRAIL_LINE_WIDTH = 2;
-const FUTURE_ALPHA = 0.33;
 
 /**
- * The path already taken, streaming out behind the crosshair. Unlike the
- * upcoming path, which is anchored in the world and so appears to stand
- * still while the crosshair travels along it, this one moves with the aim.
- * Slow motion and a control for this arrive in later steps.
+ * Which halves of the trail are drawn, and how strongly, kept per viewer
+ * rather than per run: it is a way of looking at replays, not a property of
+ * any one of them.
+ *
+ * The two behave quite differently and are worth having independently. The
+ * path already taken streams out behind the crosshair and moves with the
+ * aim. The path about to be taken is anchored in the world, so it appears
+ * to stand still while the crosshair travels along it.
+ *
+ * Defaults show the past trail solid, with the upcoming path off but its
+ * opacity preset to what reads well underneath it.
  */
-const TRAIL_MODE: TrailMode = "past";
+const STORE_PAST_ON = "refleks.trail.past.enabled";
+const STORE_PAST_ALPHA = "refleks.trail.past.opacity";
+const STORE_FUTURE_ON = "refleks.trail.future.enabled";
+const STORE_FUTURE_ALPHA = "refleks.trail.future.opacity";
 
 /**
  * One frame at the default capture rate. A flick's span ends at the kill's
@@ -93,6 +110,13 @@ export function ReplayTrailOverlay({
   manualOffsetMs?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [pastOn, setPastOn] = usePersistedState(STORE_PAST_ON, true);
+  const [pastAlpha, setPastAlpha] = usePersistedState(STORE_PAST_ALPHA, 1);
+  const [futureOn, setFutureOn] = usePersistedState(STORE_FUTURE_ON, false);
+  const [futureAlpha, setFutureAlpha] = usePersistedState(
+    STORE_FUTURE_ALPHA,
+    0.33,
+  );
   const sessions = useStore((state) => state.sessions);
   const run = useMemo(
     () => findRunByFilePath(sessions, filePath),
@@ -240,34 +264,24 @@ export function ReplayTrailOverlay({
       // the start of the next flick.
       const flickEnd = shots ? nextShotAfter(shots, traceMs) : undefined;
 
-      if (TRAIL_MODE === "past" || TRAIL_MODE === "past+future") {
-        if (TRAIL_MODE === "past+future") {
-          drawSegments(
-            ctx,
-            buildFutureSegments(
-              trace,
-              traceMs,
-              model,
-              FUTURE_WINDOW_MS,
-              flickEnd,
-            ),
-            colour,
-            TRAIL_LINE_WIDTH,
-            FUTURE_ALPHA,
-          );
-        }
-        drawSegments(
-          ctx,
-          buildPastSegments(trace, traceMs, model),
-          colour,
-          TRAIL_LINE_WIDTH,
-        );
-      } else {
+      // The upcoming path goes down first so the path already taken wins
+      // where the two meet at the crosshair.
+      if (futureOn && futureAlpha > 0) {
         drawSegments(
           ctx,
           buildFutureSegments(trace, traceMs, model, FUTURE_WINDOW_MS, flickEnd),
           colour,
           TRAIL_LINE_WIDTH,
+          futureAlpha,
+        );
+      }
+      if (pastOn && pastAlpha > 0) {
+        drawSegments(
+          ctx,
+          buildPastSegments(trace, traceMs, model),
+          colour,
+          TRAIL_LINE_WIDTH,
+          pastAlpha,
         );
       }
     };
@@ -306,15 +320,106 @@ export function ReplayTrailOverlay({
       if (rafHandle) cancelAnimationFrame(rafHandle);
       observer.disconnect();
     };
-  }, [trace, sync, run, videoRef, manualOffsetMs, colourMap, shots]);
+  }, [
+    trace,
+    sync,
+    run,
+    videoRef,
+    manualOffsetMs,
+    colourMap,
+    shots,
+    pastOn,
+    pastAlpha,
+    futureOn,
+    futureAlpha,
+  ]);
 
   if (!trace || !sync) return null;
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="pointer-events-none absolute inset-0 h-full w-full"
-      aria-hidden
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute inset-0 h-full w-full"
+        aria-hidden
+      />
+      <div className="absolute right-2 top-2 z-20">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Trail"
+              className="h-7 w-7 bg-black/50 text-white/80 hover:bg-black/70 hover:text-white"
+            >
+              <Spline className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-56 space-y-3 p-3">
+            <TrailToggle
+              label="Past trail"
+              hint="Streams out behind the crosshair"
+              enabled={pastOn}
+              onEnabled={setPastOn}
+              opacity={pastAlpha}
+              onOpacity={setPastAlpha}
+            />
+            <TrailToggle
+              label="Upcoming path"
+              hint="Anchored where the aim is heading"
+              enabled={futureOn}
+              onEnabled={setFutureOn}
+              opacity={futureAlpha}
+              onOpacity={setFutureAlpha}
+            />
+          </PopoverContent>
+        </Popover>
+      </div>
+    </>
+  );
+}
+
+function TrailToggle({
+  label,
+  hint,
+  enabled,
+  onEnabled,
+  opacity,
+  onOpacity,
+}: {
+  label: string;
+  hint: string;
+  enabled: boolean;
+  onEnabled: (value: boolean) => void;
+  opacity: number;
+  onOpacity: (value: number) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={enabled}
+          onCheckedChange={(v) => onEnabled(v === true)}
+        />
+        <span className="font-medium">{label}</span>
+      </label>
+      <p className="pl-6 text-[0.6875rem] leading-tight text-surface-muted-foreground">
+        {hint}
+      </p>
+      <div className="flex items-center gap-2 pl-6">
+        <Slider
+          value={[opacity]}
+          onValueChange={([v]) => onOpacity(v)}
+          min={0.05}
+          max={1}
+          step={0.05}
+          disabled={!enabled}
+          className={enabled ? undefined : "opacity-40"}
+        />
+        <span className="w-8 shrink-0 text-right text-[0.6875rem] tabular-nums text-surface-muted-foreground">
+          {Math.round(opacity * 100)}%
+        </span>
+      </div>
+    </div>
   );
 }
