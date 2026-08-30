@@ -93,6 +93,12 @@ func (t *trackerWin) Start() error {
 	t.wakeCh = make(chan struct{}, 1)
 	t.workerDone = make(chan struct{})
 	t.lastPrune = time.Now()
+	// All three describe one session and are cleared together. Clearing
+	// only the IDs left a restarted tracker holding the previous session's
+	// points against an empty ID list, which the next compaction could not
+	// survive - and stale points would have been reported for the new run.
+	t.buf = t.buf[:0]
+	t.start = 0
 	t.pointDeviceIDs = t.pointDeviceIDs[:0]
 	t.currentDevice = 0
 	t.deviceMu.Lock()
@@ -148,9 +154,7 @@ func (t *trackerWin) SetBufferDuration(d time.Duration) {
 		t.start = j
 		// Compact underlying slice only when start grows large to avoid frequent copies
 		if t.start > 2048 {
-			t.buf = append([]models.MousePoint(nil), t.buf[t.start:]...)
-			t.pointDeviceIDs = append([]uint32(nil), t.pointDeviceIDs[t.start:]...)
-			t.start = 0
+			t.compactLocked()
 		}
 	}
 	t.mu.Unlock()
@@ -640,9 +644,7 @@ func (t *trackerWin) eventLoop() {
 					if j > t.start {
 						t.start = j
 						if t.start > 2048 {
-							t.buf = append([]models.MousePoint(nil), t.buf[t.start:]...)
-							t.pointDeviceIDs = append([]uint32(nil), t.pointDeviceIDs[t.start:]...)
-							t.start = 0
+							t.compactLocked()
 						}
 					}
 					t.lastPrune = now
