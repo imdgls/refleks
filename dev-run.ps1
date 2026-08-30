@@ -43,13 +43,26 @@ $env:USERPROFILE = $devHome
 Write-Host "Data directory : $devHome\.refleks" -ForegroundColor Cyan
 Write-Host "Real data      : $realHome\.refleks (untouched)" -ForegroundColor DarkGray
 
+$logDir = Join-Path $devHome 'logs'
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
+$log = Join-Path $logDir ("refleks-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
+Write-Host "Log            : $log" -ForegroundColor DarkGray
+
+# Keep only the ten most recent logs.
+Get-ChildItem $logDir -Filter 'refleks-*.log' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
 if ($Watch) {
     Set-Location $repoRoot
-    wails dev
+    # A dev build logs at DEBUG. The packaged build is compiled to log only
+    # ERROR, so the capture pipeline's own warnings - lost duplication,
+    # ffmpeg stderr, segment problems - are visible only from here.
+    wails dev 2>&1 | Tee-Object -FilePath $log
 } else {
     $exe = Join-Path $repoRoot 'build\bin\refleks.exe'
     if (-not (Test-Path $exe)) {
         throw "No build found at $exe - run 'wails build' first."
     }
-    & $exe
+    & $exe 2>&1 | Tee-Object -FilePath $log
 }
