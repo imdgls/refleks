@@ -53,16 +53,22 @@ Get-ChildItem $logDir -Filter 'refleks-*.log' -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
     Remove-Item -Force -ErrorAction SilentlyContinue
 
+# Redirected by cmd rather than by PowerShell. Sending a native program's
+# stderr through 2>&1 in Windows PowerShell turns every line it writes into
+# an error record, which paints the console red and can stop the script on
+# output that was never a failure.
+Write-Host "Follow it with: Get-Content -Wait `"$log`"" -ForegroundColor DarkGray
+
 if ($Watch) {
     Set-Location $repoRoot
-    # A dev build logs at DEBUG. The packaged build is compiled to log only
-    # ERROR, so the capture pipeline's own warnings - lost duplication,
-    # ffmpeg stderr, segment problems - are visible only from here.
-    wails dev 2>&1 | Tee-Object -FilePath $log
+    # A dev build logs at DEBUG. The packaged build logs only ERROR, which
+    # still carries "screen capture runtime failure" but none of the detail
+    # around it.
+    & cmd /c "wails dev > `"$log`" 2>&1"
 } else {
     $exe = Join-Path $repoRoot 'build\bin\refleks.exe'
     if (-not (Test-Path $exe)) {
         throw "No build found at $exe - run 'wails build' first."
     }
-    & $exe 2>&1 | Tee-Object -FilePath $log
+    & cmd /c "`"$exe`" > `"$log`" 2>&1"
 }
