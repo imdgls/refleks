@@ -34,7 +34,15 @@ import type { AnalysisSummary } from "./scenarioAnalysis";
 export type FlickMarker = {
   killIdx: number;
   classification: KillClassification;
-  videoSeconds: number;
+  /**
+   * Seconds elapsed into the run, the same axis the charts use.
+   *
+   * Deliberately not video time. Placing flicks on the run puts all three
+   * panels on one axis so they line up with each other, and it means the
+   * strip needs no replay - it can be shown while the clip is still being
+   * cut, with only seeking held back until there is something to seek.
+   */
+  runSeconds: number;
 };
 
 export type TimedPoint = { timeSec: number; videoSeconds: number };
@@ -140,16 +148,23 @@ export function useReplayInsights(
       : null;
 
     const frame0 = sync?.frame0EpochMs ?? 0;
-    const killVideoSeconds = (epochMs: number) => (epochMs - frame0) / 1000;
 
-    const flicks: FlickMarker[] =
-      sync && mouse
-        ? mouse.kills.map((k) => ({
-            killIdx: k.killIdx,
-            classification: k.classification,
-            videoSeconds: killVideoSeconds(k.endMs),
-          }))
-        : [];
+    // Placed from the chart's own timeline, so the strip needs neither a
+    // replay nor a sidecar to be drawn.
+    const flicks: FlickMarker[] = [];
+    if (mouse && scenario) {
+      for (const kill of mouse.kills) {
+        const runSeconds = scenario.timeSec[kill.killIdx - 1];
+        if (typeof runSeconds !== "number" || !Number.isFinite(runSeconds)) {
+          continue;
+        }
+        flicks.push({
+          killIdx: kill.killIdx,
+          classification: kill.classification,
+          runSeconds,
+        });
+      }
+    }
 
     // Anchor for the charts' elapsed-seconds axis.
     let anchorMs: number | null = null;

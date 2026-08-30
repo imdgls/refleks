@@ -54,7 +54,6 @@ export function ReplayInsights({
   const insights = useReplayInsights(run, replayUrl);
   const video = useReplayPlayer(filePath);
   const position = usePlaybackPosition(video);
-  const duration = useDuration(video, insights.sync);
 
   const seek = useMemo(() => {
     if (!video) return null;
@@ -90,9 +89,9 @@ export function ReplayInsights({
           {(headerSlot) => (
             <FlickStrip
               flicks={insights.flicks}
-              duration={duration}
-              position={position}
-              onSeek={seek}
+              runDuration={insights.runDurationSeconds}
+              playhead={chartPlayhead}
+              onSeek={seekFromChart}
               headerSlot={headerSlot}
             />
           )}
@@ -192,15 +191,17 @@ function Labelled({ label, children }: { label: string; children: ReactNode }) {
 
 function FlickStrip({
   flicks,
-  duration,
-  position,
+  runDuration,
+  playhead,
   onSeek,
   headerSlot,
 }: {
   flicks: FlickMarker[];
-  duration: number;
-  position: number;
-  onSeek: ((videoSeconds: number) => void) | null;
+  runDuration: number;
+  /** Playback position on the run's timeline, or null when there is no replay. */
+  playhead: number | null;
+  /** Null until a replay exists to seek; the strip is still worth showing. */
+  onSeek: ((runSeconds: number) => void) | null;
   headerSlot: (node: ReactNode) => void;
 }) {
   const [hidden, setHidden] = usePersistedState<KillClassification[]>(
@@ -251,12 +252,17 @@ function FlickStrip({
     return () => headerSlot(null);
   }, [counts, hidden, headerSlot, setHidden]);
 
-  const span = duration > 0 ? duration : 1;
+  const span = runDuration > 0 ? runDuration : 1;
   const visible = flicks.filter((f) => !hidden.includes(f.classification));
+  const pct = (seconds: number) =>
+    Math.min(100, Math.max(0, (seconds / span) * 100));
 
   return (
     <div
-      className="relative h-6 w-full overflow-hidden rounded-md bg-surface"
+      className={cn(
+        "relative h-6 w-full overflow-hidden rounded-md bg-surface",
+        onSeek && "cursor-pointer",
+      )}
       onClick={(e) => {
         if (!onSeek) return;
         const rect = e.currentTarget.getBoundingClientRect();
@@ -269,23 +275,25 @@ function FlickStrip({
           key={f.killIdx}
           type="button"
           title={`#${f.killIdx} ${f.classification}`}
+          disabled={!onSeek}
           onClick={(e) => {
             e.stopPropagation();
-            onSeek?.(Math.max(0, f.videoSeconds - 0.35));
+            // Land shortly before the kill, so the flick itself still plays.
+            onSeek?.(Math.max(0, f.runSeconds - 0.35));
           }}
-          className="absolute top-1 h-4 w-1.5 -translate-x-1/2 rounded-[1px] hover:h-5 hover:top-0.5"
+          className="absolute top-1 h-4 w-1.5 -translate-x-1/2 rounded-[1px] hover:top-0.5 hover:h-5 disabled:cursor-default"
           style={{
-            left: `${Math.min(100, Math.max(0, (f.videoSeconds / span) * 100))}%`,
+            left: `${pct(f.runSeconds)}%`,
             background: CLASSIFICATION_COLORS[f.classification],
           }}
         />
       ))}
-      <div
-        className="pointer-events-none absolute inset-y-0 w-px bg-foreground"
-        style={{
-          left: `${Math.min(100, Math.max(0, (position / span) * 100))}%`,
-        }}
-      />
+      {playhead !== null && (
+        <div
+          className="pointer-events-none absolute inset-y-0 w-px bg-foreground"
+          style={{ left: `${pct(playhead)}%` }}
+        />
+      )}
     </div>
   );
 }
@@ -349,24 +357,3 @@ function usePlaybackPosition(video: HTMLVideoElement | null): number {
   return position;
 }
 
-function useDuration(
-  video: HTMLVideoElement | null,
-  sync: ReturnType<typeof useReplayInsights>["sync"],
-): number {
-  const [duration, setDuration] = useState(0);
-
-  useEffect(() => {
-    if (!video) return;
-    const read = () => {
-      if (Number.isFinite(video.duration)) setDuration(video.duration);
-    };
-    read();
-    video.addEventListener("durationchange", read);
-    return () => video.removeEventListener("durationchange", read);
-  }, [video]);
-
-  if (duration > 0) return duration;
-  // Before the element reports one, the sidecar's own window is the same span.
-  if (sync) return (sync.replayEndEpochMs - sync.frame0EpochMs) / 1000;
-  return 0;
-}

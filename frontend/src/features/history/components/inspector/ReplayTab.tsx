@@ -330,17 +330,31 @@ function ReplaySlot({
   }
 
   return (
-    <div
-      className="flex min-h-40 items-center justify-center rounded-xl bg-surface-subtle p-6 text-center"
-      style={waiting ? { aspectRatio: DEFAULT_ASPECT } : undefined}
-    >
-      <p className="text-sm text-surface-muted-foreground" aria-live="polite">
-        {waiting
-          ? translateMessage(status?.message) ||
-            t("history.replay.waitingForFinish")
-          : translateMessage(status?.message) ||
-            t("history.replay.noReplayAvailable")}
-      </p>
+    <div className="space-y-2">
+      <div
+        className="flex min-h-40 items-center justify-center rounded-xl bg-surface-subtle p-6 text-center"
+        style={waiting ? { aspectRatio: DEFAULT_ASPECT } : undefined}
+      >
+        <p
+          className="flex items-center gap-2 text-sm text-surface-muted-foreground"
+          aria-live="polite"
+        >
+          {/* A cut takes a handful of seconds, dominated by waiting for the
+              segment covering the run's end to close. There is no fraction to
+              read anywhere in that, so this says only that it is under way. */}
+          {waiting && (
+            <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-current" />
+          )}
+          {waiting
+            ? translateMessage(status?.message) ||
+              t("history.replay.waitingForFinish")
+            : translateMessage(status?.message) ||
+              t("history.replay.noReplayAvailable")}
+        </p>
+      </div>
+      {/* The panels need no video: everything in them is built from the run's
+          own stats and trace. Only seeking waits for the clip. */}
+      {primary && <ReplayInsights filePath={filePath} replayUrl="" />}
     </div>
   );
 }
