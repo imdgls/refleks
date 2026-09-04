@@ -374,7 +374,7 @@ const SPEED_STEP = 0.1;
 // there is nothing outside the frame to reveal by going below 1.
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 4;
-const ZOOM_STEP = 0.25;
+const ZOOM_STEP = 0.5;
 const DEFAULT_ASPECT = 16 / 9;
 
 function releaseVideo(video: HTMLVideoElement) {
@@ -861,6 +861,12 @@ function VideoPlayer({
               title="Zoom in"
               onClick={() => nudgeZoom(ZOOM_STEP)}
               disabled={zoom >= ZOOM_MAX - 0.001}
+            />
+            <ControlBtn
+              icon={<RotateCcw className="h-3 w-3" />}
+              title="Reset zoom to 100%"
+              onClick={() => setZoom(ZOOM_MIN)}
+              disabled={zoom <= ZOOM_MIN + 0.001}
             />
           </div>
 
