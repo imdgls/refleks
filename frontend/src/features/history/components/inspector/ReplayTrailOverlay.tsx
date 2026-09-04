@@ -106,11 +106,18 @@ export function ReplayTrailOverlay({
   filePath,
   replayUrl,
   manualOffsetMs = 0,
+  zoom = 1,
 }: {
   videoRef: RefObject<HTMLVideoElement>;
   filePath: string;
   replayUrl: string;
   manualOffsetMs?: number;
+  /**
+   * Magnification of the picture about its centre. Applied to the drawing
+   * rather than to the canvas element: scaling a raster would soften the
+   * line, while scaling the projection keeps it drawn at full resolution.
+   */
+  zoom?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [pastOn, setPastOn] = usePersistedState(STORE_PAST_ON, true);
@@ -245,7 +252,6 @@ export function ReplayTrailOverlay({
         const dpr = window.devicePixelRatio || 1;
         canvas.width = Math.round(width * dpr);
         canvas.height = Math.round(height * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         model = screenModelFromSummary(run?.stats?.summary, width, height);
         lastWidth = width;
         lastHeight = height;
@@ -253,7 +259,22 @@ export function ReplayTrailOverlay({
 
       lastMediaTime = time;
 
-      ctx.clearRect(0, 0, width, height);
+      // Clear in device pixels, before any zoom is applied, so the whole
+      // canvas is wiped however far the drawing is magnified.
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Magnify about the centre of the frame, which is where the crosshair
+      // sits and what the video element scales around.
+      const z = zoom > 0 ? zoom : 1;
+      ctx.setTransform(
+        dpr * z,
+        0,
+        0,
+        dpr * z,
+        (dpr * width * (1 - z)) / 2,
+        (dpr * height * (1 - z)) / 2,
+      );
       if (!model) return;
 
       const traceMs = videoTimeToTraceEpochMs(sync, time, manualOffsetMs);
@@ -340,6 +361,7 @@ export function ReplayTrailOverlay({
     futureOn,
     futureAlpha,
     coloursOn,
+    zoom,
   ]);
 
   // Share the element with the panels drawn under the replay. Registered

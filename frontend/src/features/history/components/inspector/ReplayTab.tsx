@@ -16,12 +16,16 @@ import type { ReplayFileInfo, ReplayStatus } from "@/shared/types/ipc";
 import {
   Download,
   Maximize2,
+  Minus,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   SkipBack,
   SkipForward,
   Trash2,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HistoryRun } from "../../lib/historyModels";
@@ -362,8 +366,15 @@ function ReplaySlot({
 /* ─── Video Player ─── */
 
 const SPEED_MIN = 0.1;
-const SPEED_MAX = 4;
+const SPEED_MAX = 2;
 const SPEED_DEFAULT = 1;
+const SPEED_STEP = 0.1;
+
+// Zoom only ever magnifies towards the middle, where the crosshair is;
+// there is nothing outside the frame to reveal by going below 1.
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.25;
 const DEFAULT_ASPECT = 16 / 9;
 
 function releaseVideo(video: HTMLVideoElement) {
@@ -417,6 +428,7 @@ function VideoPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [speed, setSpeed] = useState(SPEED_DEFAULT);
+  const [zoom, setZoom] = useState(ZOOM_MIN);
   const [dragging, setDragging] = useState(false);
   const [aspect, setAspect] = useState(DEFAULT_ASPECT);
   // Tracks whether a seek the browser is currently processing is in flight,
@@ -584,6 +596,20 @@ function VideoPlayer({
   const speedLabel =
     speed === Math.round(speed) ? `${speed}x` : `${speed.toFixed(1)}x`;
   const isDefaultSpeed = Math.abs(speed - SPEED_DEFAULT) < 0.05;
+  const nudgeSpeed = (delta: number) =>
+    setSpeed((prev) =>
+      Math.min(
+        SPEED_MAX,
+        Math.max(SPEED_MIN, Math.round((prev + delta) * 10) / 10),
+      ),
+    );
+  const nudgeZoom = (delta: number) =>
+    setZoom((prev) =>
+      Math.min(
+        ZOOM_MAX,
+        Math.max(ZOOM_MIN, Math.round((prev + delta) * 100) / 100),
+      ),
+    );
   const closeDeleteModal = () => {
     if (!deleting) setConfirmOpen(false);
   };
@@ -653,7 +679,7 @@ function VideoPlayer({
               "block",
               fitAvailable ? "max-h-full max-w-full" : "h-auto w-full",
             )}
-            style={{ aspectRatio: aspect }}
+            style={{ aspectRatio: aspect, transform: `scale(${zoom})` }}
             onTimeUpdate={() => {
               const v = videoRef.current;
               if (v && !dragging) {
@@ -719,6 +745,7 @@ function VideoPlayer({
             videoRef={videoRef}
             filePath={filePath}
             replayUrl={path}
+            zoom={zoom}
           />
         </div>
       </div>
@@ -786,14 +813,26 @@ function VideoPlayer({
             <span className="text-[0.6875rem] font-medium text-surface-muted-foreground">
               {t("history.replay.speed")}
             </span>
+            <ControlBtn
+              icon={<Minus className="h-3 w-3" />}
+              title={`-${SPEED_STEP}x`}
+              onClick={() => nudgeSpeed(-SPEED_STEP)}
+              disabled={speed <= SPEED_MIN + 0.001}
+            />
             <Slider
               value={[speed]}
               min={SPEED_MIN}
               max={SPEED_MAX}
-              step={0.1}
+              step={SPEED_STEP}
               aria-label={t("history.replay.playbackSpeed")}
-              onValueChange={([v]) => setSpeed(v)}
+              onValueChange={([v]) => setSpeed(Math.round(v * 10) / 10)}
               className="w-20"
+            />
+            <ControlBtn
+              icon={<Plus className="h-3 w-3" />}
+              title={`+${SPEED_STEP}x`}
+              onClick={() => nudgeSpeed(SPEED_STEP)}
+              disabled={speed >= SPEED_MAX - 0.001}
             />
             <span className="min-w-[2.5rem] text-center text-[0.6875rem] font-medium tabular-nums text-surface-muted-foreground">
               {speedLabel}
@@ -803,6 +842,25 @@ function VideoPlayer({
               title={t("history.replay.resetSpeed")}
               onClick={() => setSpeed(SPEED_DEFAULT)}
               disabled={isDefaultSpeed}
+            />
+          </div>
+
+          {/* Zoom */}
+          <div className="flex items-center gap-0.5 rounded-xl bg-surface-subtle p-1">
+            <ControlBtn
+              icon={<ZoomOut className="h-3.5 w-3.5" />}
+              title="Zoom out"
+              onClick={() => nudgeZoom(-ZOOM_STEP)}
+              disabled={zoom <= ZOOM_MIN + 0.001}
+            />
+            <span className="min-w-[2.25rem] text-center text-[0.6875rem] font-medium tabular-nums text-surface-muted-foreground">
+              {zoom.toFixed(2).replace(/\.?0+$/, "")}x
+            </span>
+            <ControlBtn
+              icon={<ZoomIn className="h-3.5 w-3.5" />}
+              title="Zoom in"
+              onClick={() => nudgeZoom(ZOOM_STEP)}
+              disabled={zoom >= ZOOM_MAX - 0.001}
             />
           </div>
 
