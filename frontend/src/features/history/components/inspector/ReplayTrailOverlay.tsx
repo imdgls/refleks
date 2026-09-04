@@ -31,6 +31,7 @@ import {
   FUTURE_WINDOW_MS,
   nextShotAfter,
   TraceLookup,
+  TRAIL_WINDOW_MS,
 } from "../../lib/trailGeometry";
 import { screenModelFromSummary } from "../../lib/trailProjection";
 import type { ScreenModel } from "../../lib/trailProjection";
@@ -73,6 +74,19 @@ const STORE_PAST_ALPHA = "refleks.trail.past.opacity";
 const STORE_FUTURE_ON = "refleks.trail.future.enabled";
 const STORE_FUTURE_ALPHA = "refleks.trail.future.opacity";
 const STORE_COLOURS = "refleks.trail.classificationColours";
+const STORE_PAST_WINDOW = "refleks.trail.past.windowMs";
+const STORE_FUTURE_WINDOW = "refleks.trail.future.windowMs";
+
+/**
+ * How much movement each half of the trail covers, in milliseconds.
+ *
+ * Kept apart for the two sides because they answer different questions: how
+ * far back is worth seeing is a matter of taste, while how far forward is
+ * bounded by the shot in front of it anyway.
+ */
+const WINDOW_MIN_MS = 50;
+const WINDOW_MAX_MS = 1000;
+const WINDOW_STEP_MS = 25;
 
 /**
  * One frame at the default capture rate. A flick's span ends at the kill's
@@ -126,6 +140,14 @@ export function ReplayTrailOverlay({
   const [futureAlpha, setFutureAlpha] = usePersistedState(
     STORE_FUTURE_ALPHA,
     0.33,
+  );
+  const [pastWindow, setPastWindow] = usePersistedState(
+    STORE_PAST_WINDOW,
+    TRAIL_WINDOW_MS,
+  );
+  const [futureWindow, setFutureWindow] = usePersistedState(
+    STORE_FUTURE_WINDOW,
+    FUTURE_WINDOW_MS,
   );
   const [coloursOn, setColoursOn] = usePersistedState(STORE_COLOURS, true);
   const [autoSelect, setAutoSelect] = usePersistedState(STORE_AUTO_SELECT, true);
@@ -297,7 +319,7 @@ export function ReplayTrailOverlay({
       if (futureOn && futureAlpha > 0) {
         drawSegments(
           ctx,
-          buildFutureSegments(trace, traceMs, model, FUTURE_WINDOW_MS, flickEnd),
+          buildFutureSegments(trace, traceMs, model, futureWindow, flickEnd),
           colour,
           TRAIL_LINE_WIDTH,
           futureAlpha,
@@ -306,7 +328,7 @@ export function ReplayTrailOverlay({
       if (pastOn && pastAlpha > 0) {
         drawSegments(
           ctx,
-          buildPastSegments(trace, traceMs, model),
+          buildPastSegments(trace, traceMs, model, pastWindow),
           colour,
           TRAIL_LINE_WIDTH,
           pastAlpha,
@@ -360,6 +382,8 @@ export function ReplayTrailOverlay({
     pastAlpha,
     futureOn,
     futureAlpha,
+    pastWindow,
+    futureWindow,
     coloursOn,
     zoom,
   ]);
@@ -394,7 +418,7 @@ export function ReplayTrailOverlay({
               <Spline className="h-4 w-4" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-56 space-y-3 p-3">
+          <PopoverContent align="end" className="w-64 space-y-3 p-3">
             <TrailToggle
               label="Past trail"
               hint="Streams out behind the crosshair"
@@ -402,6 +426,8 @@ export function ReplayTrailOverlay({
               onEnabled={setPastOn}
               opacity={pastAlpha}
               onOpacity={setPastAlpha}
+              windowMs={pastWindow}
+              onWindowMs={setPastWindow}
             />
             <TrailToggle
               label="Upcoming path"
@@ -410,6 +436,8 @@ export function ReplayTrailOverlay({
               onEnabled={setFutureOn}
               opacity={futureAlpha}
               onOpacity={setFutureAlpha}
+              windowMs={futureWindow}
+              onWindowMs={setFutureWindow}
             />
             <label className="flex items-center gap-2 border-t border-surface-border pt-3 text-sm">
               <Checkbox
@@ -445,6 +473,8 @@ function TrailToggle({
   onEnabled,
   opacity,
   onOpacity,
+  windowMs,
+  onWindowMs,
 }: {
   label: string;
   hint: string;
@@ -452,6 +482,8 @@ function TrailToggle({
   onEnabled: (value: boolean) => void;
   opacity: number;
   onOpacity: (value: number) => void;
+  windowMs: number;
+  onWindowMs: (value: number) => void;
 }) {
   return (
     <div className="space-y-1.5">
@@ -465,20 +497,66 @@ function TrailToggle({
       <p className="pl-6 text-[0.6875rem] leading-tight text-surface-muted-foreground">
         {hint}
       </p>
-      <div className="flex items-center gap-2 pl-6">
-        <Slider
-          value={[opacity]}
-          onValueChange={([v]) => onOpacity(v)}
-          min={0.05}
-          max={1}
-          step={0.05}
-          disabled={!enabled}
-          className={enabled ? undefined : "opacity-40"}
-        />
-        <span className="w-8 shrink-0 text-right text-[0.6875rem] tabular-nums text-surface-muted-foreground">
-          {Math.round(opacity * 100)}%
-        </span>
-      </div>
+      <TrailSlider
+        name="Length"
+        value={windowMs}
+        onChange={onWindowMs}
+        min={WINDOW_MIN_MS}
+        max={WINDOW_MAX_MS}
+        step={WINDOW_STEP_MS}
+        enabled={enabled}
+        format={(v) => `${v} ms`}
+      />
+      <TrailSlider
+        name="Opacity"
+        value={opacity}
+        onChange={onOpacity}
+        min={0.05}
+        max={1}
+        step={0.05}
+        enabled={enabled}
+        format={(v) => `${Math.round(v * 100)}%`}
+      />
+    </div>
+  );
+}
+
+function TrailSlider({
+  name,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  enabled,
+  format,
+}: {
+  name: string;
+  value: number;
+  onChange: (value: number) => void;
+  min: number;
+  max: number;
+  step: number;
+  enabled: boolean;
+  format: (value: number) => string;
+}) {
+  return (
+    <div className="flex items-center gap-2 pl-6">
+      <span className="w-12 shrink-0 text-[0.6875rem] text-surface-muted-foreground">
+        {name}
+      </span>
+      <Slider
+        value={[value]}
+        onValueChange={([v]) => onChange(v)}
+        min={min}
+        max={max}
+        step={step}
+        disabled={!enabled}
+        className={enabled ? undefined : "opacity-40"}
+      />
+      <span className="w-12 shrink-0 text-right text-[0.6875rem] tabular-nums text-surface-muted-foreground">
+        {format(value)}
+      </span>
     </div>
   );
 }
