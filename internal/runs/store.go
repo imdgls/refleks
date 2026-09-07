@@ -441,6 +441,9 @@ func (s *Store) LoadRecentRuns(limit int) ([]models.RunRecord, error) {
 			}
 			s.index.cacheRecord(v.path, rec)
 		}
+		// Runs written before the pause was taken out of the duration still
+		// carry the inflated figure; rebuild it rather than rewrite them.
+		repairPausedDuration(&rec)
 		rr := models.RunRecord{
 			FileVersion:  rec.FileVersion,
 			FilePath:     v.path,

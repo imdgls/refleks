@@ -76,7 +76,7 @@ func (s *Store) IngestRun(fullPath string, mouse models.MouseTraceProvider) (mod
 
 	start, end := deriveScenarioWindow(info.DatePlayed, stats.Summary, stats.Events)
 	if !start.IsZero() && !end.IsZero() {
-		stats.Summary.Duration = end.Sub(start).Seconds()
+		stats.Summary.Duration = playtimeSeconds(end.Sub(start), stats.Summary)
 	}
 
 	fileName := runFileNameFromStatsPath(fullPath)
