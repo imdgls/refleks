@@ -1,5 +1,6 @@
 import { useStore } from "@/shared/hooks";
 import { getScenarioName } from "@/shared/lib";
+import type { Session } from "@/shared/types";
 import { useMemo } from "react";
 import {
   lookupCategory,
@@ -39,6 +40,14 @@ export type BreakdownSection = {
 };
 
 export type TodayBreakdown = {
+  /**
+   * Wall clock covered by the day's sessions, summed. Not the same as the
+   * distance from the first run to the last: two sessions with a three-hour
+   * break between them cover their own spans, not the break.
+   */
+  sessionSeconds: number;
+  /** How many sessions contributed runs today. */
+  sessions: number;
   totalSeconds: number;
   /** Seconds that resolved to a single agreed category. */
   knownSeconds: number;
@@ -55,81 +64,139 @@ function startOfToday(): number {
   return d.getTime();
 }
 
+/**
+ * A session's wall clock, clipped to today.
+ *
+ * Sessions run past midnight, so a session is worth only the part of it that
+ * falls on this side of it. Where the recorded bounds are unusable the run
+ * timestamps stand in, and an unfinished session is measured to now rather
+ * than to whatever its end field happens to say.
+ */
+function sessionSecondsToday(
+  session: Session,
+  dayStart: number,
+  now: number,
+): number {
+  const dayEnd = Math.min(dayStart + 86_400_000, now);
+
+  let start = Date.parse(session.start);
+  let end = Date.parse(session.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    const stamps = session.items
+      .map((item) => Date.parse(String(item.stats?.summary.datePlayed ?? "")))
+      .filter((ts) => Number.isFinite(ts));
+    if (stamps.length === 0) return 0;
+    start = Math.min(...stamps);
+    end = Math.max(...stamps);
+  }
+  end = Math.min(end, now);
+
+  const from = Math.max(start, dayStart);
+  const to = Math.min(end, dayEnd);
+  return to > from ? (to - from) / 1000 : 0;
+}
+
 export function useTodayBreakdown(
   index: Map<string, ScenarioCategory>,
 ): TodayBreakdown {
   const sessions = useStore((state) => state.sessions);
+  return useMemo(
+    () => buildTodayBreakdown(sessions, index, startOfToday(), Date.now()),
+    [sessions, index],
+  );
+}
 
-  return useMemo(() => {
-    const from = startOfToday();
-    const perScenario = new Map<string, { seconds: number; runs: number }>();
-    let totalSeconds = 0;
-    let runs = 0;
+/** The hook's body, with the clock passed in so it can be checked. */
+export function buildTodayBreakdown(
+  sessions: Session[],
+  index: Map<string, ScenarioCategory>,
+  from: number,
+  now: number,
+): TodayBreakdown {
+  const perScenario = new Map<string, { seconds: number; runs: number }>();
+  let totalSeconds = 0;
+  let runs = 0;
+  let sessionSeconds = 0;
+  let sessionCount = 0;
 
-    for (const session of sessions) {
-      for (const item of session.items) {
-        const played = Date.parse(String(item.stats?.summary.datePlayed ?? ""));
-        if (!Number.isFinite(played) || played < from) continue;
-        const seconds = Number(item.stats?.summary.duration ?? 0);
-        if (!Number.isFinite(seconds) || seconds <= 0) continue;
+  for (const session of sessions) {
+    let runsToday = 0;
+    for (const item of session.items) {
+      const played = Date.parse(String(item.stats?.summary.datePlayed ?? ""));
+      if (!Number.isFinite(played) || played < from) continue;
+      const seconds = Number(item.stats?.summary.duration ?? 0);
+      if (!Number.isFinite(seconds) || seconds <= 0) continue;
 
-        const name = getScenarioName(item);
-        if (!name) continue;
-        const entry = perScenario.get(name) ?? { seconds: 0, runs: 0 };
-        entry.seconds += seconds;
-        entry.runs += 1;
-        perScenario.set(name, entry);
-        totalSeconds += seconds;
-        runs += 1;
-      }
+      const name = getScenarioName(item);
+      if (!name) continue;
+      const entry = perScenario.get(name) ?? { seconds: 0, runs: 0 };
+      entry.seconds += seconds;
+      entry.runs += 1;
+      perScenario.set(name, entry);
+      totalSeconds += seconds;
+      runs += 1;
+      runsToday += 1;
+    }
+    // A session that contributed nothing today contributes no time either,
+    // even if it happens to straddle midnight.
+    if (runsToday > 0) {
+      sessionCount += 1;
+      sessionSeconds += sessionSecondsToday(session, from, now);
+    }
+  }
+
+  const sections = new Map<string, BreakdownSection>();
+  let knownSeconds = 0;
+
+  const section = (key: string, label: string, tone: SectionTone) => {
+    let found = sections.get(key);
+    if (!found) {
+      found = { key, label, seconds: 0, tone, scenarios: [] };
+      sections.set(key, found);
+    }
+    return found;
+  };
+
+  for (const [scenario, { seconds, runs: count }] of perScenario) {
+    const category = lookupCategory(index, scenario);
+    let target: BreakdownSection;
+    let note: string | null = null;
+
+    if (category.kind === "known") {
+      const label = placementLabel(category.placement);
+      target = section(label, label, "known");
+      knownSeconds += seconds;
+    } else if (category.kind === "conflict") {
+      target = section(CONFLICT_KEY, "Category disputed", "conflict");
+      note = category.candidates.map(placementLabel).join("  /  ");
+    } else {
+      target = section(UNKNOWN_KEY, "Unknown category", "unknown");
     }
 
-    const sections = new Map<string, BreakdownSection>();
-    let knownSeconds = 0;
+    target.seconds += seconds;
+    target.scenarios.push({ scenario, seconds, runs: count, note });
+  }
 
-    const section = (key: string, label: string, tone: SectionTone) => {
-      let found = sections.get(key);
-      if (!found) {
-        found = { key, label, seconds: 0, tone, scenarios: [] };
-        sections.set(key, found);
-      }
-      return found;
-    };
+  const ordered = [...sections.values()].sort((a, b) => {
+    // The two "we do not know" groups always sit at the bottom, so a real
+    // category is never read as competing with them for position.
+    const rank = (s: BreakdownSection) =>
+      s.tone === "known" ? 0 : s.tone === "conflict" ? 1 : 2;
+    const byRank = rank(a) - rank(b);
+    return byRank !== 0 ? byRank : b.seconds - a.seconds;
+  });
+  for (const s of ordered) {
+    s.scenarios.sort((a, b) => b.seconds - a.seconds);
+  }
 
-    for (const [scenario, { seconds, runs: count }] of perScenario) {
-      const category = lookupCategory(index, scenario);
-      let target: BreakdownSection;
-      let note: string | null = null;
-
-      if (category.kind === "known") {
-        const label = placementLabel(category.placement);
-        target = section(label, label, "known");
-        knownSeconds += seconds;
-      } else if (category.kind === "conflict") {
-        target = section(CONFLICT_KEY, "Category disputed", "conflict");
-        note = category.candidates.map(placementLabel).join("  /  ");
-      } else {
-        target = section(UNKNOWN_KEY, "Unknown category", "unknown");
-      }
-
-      target.seconds += seconds;
-      target.scenarios.push({ scenario, seconds, runs: count, note });
-    }
-
-    const ordered = [...sections.values()].sort((a, b) => {
-      // The two "we do not know" groups always sit at the bottom, so a real
-      // category is never read as competing with them for position.
-      const rank = (s: BreakdownSection) =>
-        s.tone === "known" ? 0 : s.tone === "conflict" ? 1 : 2;
-      const byRank = rank(a) - rank(b);
-      return byRank !== 0 ? byRank : b.seconds - a.seconds;
-    });
-    for (const s of ordered) {
-      s.scenarios.sort((a, b) => b.seconds - a.seconds);
-    }
-
-    return { totalSeconds, knownSeconds, runs, sections: ordered };
-  }, [sessions, index]);
+  return {
+    sessionSeconds,
+    sessions: sessionCount,
+    totalSeconds,
+    knownSeconds,
+    runs,
+    sections: ordered,
+  };
 }
 
 export function formatMinutes(seconds: number): string {

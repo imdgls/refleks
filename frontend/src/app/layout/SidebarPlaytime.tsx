@@ -1,4 +1,3 @@
-import { useRecentSessionSnapshot } from "@/features/overview/hooks/useRecentSessionSnapshot";
 import {
   Tooltip,
   TooltipContent,
@@ -13,8 +12,12 @@ import { buildScenarioCategories } from "./scenarioCategories";
 import { formatMinutes, useTodayBreakdown } from "./todayScenarios";
 
 /**
- * Session and playtime, in the sidebar rather than on the overview page, so
- * the figure is there whichever page is open.
+ * Session and playtime for the day, in the sidebar rather than on the
+ * overview page, so the figure is there whichever page is open.
+ *
+ * The whole day rather than the current session: training that resumes after
+ * dinner is the same day's training, and a figure that resets when a session
+ * boundary happens to fall is not the figure anyone wants to read.
  *
  * It folds away, and remembers that it is folded. Watching the clock climb
  * is not always welcome, and a number you cannot get away from is worse than
@@ -28,9 +31,8 @@ import { formatMinutes, useTodayBreakdown } from "./todayScenarios";
  * fetched once the breakdown is opened for the first time - it is most of a
  * megabyte, and nothing else in the sidebar needs it.
  *
- * The snapshot is the same one the overview page reads. It is memoised on the
- * session list, so a second reader costs a recomputation only when a run
- * lands, not on every render or route change.
+ * Everything shown is derived here from the session list, memoised on it, so
+ * it recomputes when a run lands rather than on every render or route change.
  */
 
 const STORE_EXPANDED = "refleks.sidebar.playtime.expanded";
@@ -40,7 +42,6 @@ type CategoryState = "idle" | "loading" | "ready" | "unavailable";
 
 export function SidebarPlaytime({ open }: { open: boolean }) {
   const { t } = useI18n();
-  const snapshot = useRecentSessionSnapshot();
   const { benchmarks, progressMap, loadAllProgress } = useBenchmarks();
   const [expanded, setExpanded] = usePersistedState(STORE_EXPANDED, true);
   const [listOpen, setListOpen] = usePersistedState(STORE_LIST_OPEN, false);
@@ -71,6 +72,18 @@ export function SidebarPlaytime({ open }: { open: boolean }) {
     [benchmarks, progressMap],
   );
   const breakdown = useTodayBreakdown(index);
+
+  const sessionLabel = formatMinutes(breakdown.sessionSeconds);
+  const playedLabel = formatMinutes(breakdown.totalSeconds);
+  const sessionDetail =
+    breakdown.sessions > 1 ? `today, ${breakdown.sessions} sessions` : "today";
+  const activePct =
+    breakdown.sessionSeconds > 0
+      ? Math.min(
+          100,
+          Math.round((breakdown.totalSeconds / breakdown.sessionSeconds) * 100),
+        )
+      : null;
 
   const categorised =
     breakdown.totalSeconds > 0
@@ -121,7 +134,7 @@ export function SidebarPlaytime({ open }: { open: boolean }) {
             <div className="space-y-0.5">
               <div>{title}</div>
               <div className="tabular-nums">
-                {snapshot.sessionLengthLabel} - {snapshot.activePlaytimeLabel}
+                {sessionLabel} - {playedLabel} played
               </div>
             </div>
           ) : (
@@ -146,10 +159,10 @@ export function SidebarPlaytime({ open }: { open: boolean }) {
           >
             <div className="flex items-baseline gap-1.5">
               <span className="text-sm font-semibold tabular-nums text-sidebar-foreground">
-                {snapshot.sessionLengthLabel}
+                {sessionLabel}
               </span>
               <span className="truncate text-[0.625rem] text-surface-muted-foreground">
-                {snapshot.sessionLengthDetail}
+                {sessionDetail}
               </span>
               <ChevronDown
                 aria-hidden
@@ -162,10 +175,10 @@ export function SidebarPlaytime({ open }: { open: boolean }) {
             <div className="flex items-baseline gap-1.5">
               <Gamepad2 className="size-3 shrink-0 self-center text-surface-muted-foreground" />
               <span className="text-sm font-medium tabular-nums text-sidebar-foreground">
-                {snapshot.activePlaytimeLabel}
+                {playedLabel}
               </span>
               <span className="truncate text-[0.625rem] text-surface-muted-foreground">
-                {snapshot.activePlaytimeDetail}
+                {activePct !== null ? `${activePct}% active` : "in scenarios"}
               </span>
             </div>
           </button>
@@ -205,16 +218,10 @@ function TodayList({
 
   return (
     <div className="max-h-72 overflow-y-auto px-2 pb-2">
-      <div className="flex items-baseline justify-between gap-1 pb-1 text-[0.625rem] uppercase tracking-wider text-surface-muted-foreground">
-        <span>Today</span>
-        <span className="tabular-nums">
-          {formatMinutes(breakdown.totalSeconds)}
-        </span>
-      </div>
-
-      <p className="pb-1.5 text-[0.625rem] text-surface-muted-foreground">
+      <p className="pb-1.5 pt-0.5 text-[0.625rem] text-surface-muted-foreground">
         {catState === "loading" && "Loading categories..."}
-        {catState === "unavailable" && "Categories unavailable - listing by scenario."}
+        {catState === "unavailable" &&
+          "Categories unavailable - listing by scenario."}
         {catState !== "loading" &&
           catState !== "unavailable" &&
           (indexUsable
