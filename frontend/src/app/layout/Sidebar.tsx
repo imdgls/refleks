@@ -1,4 +1,3 @@
-import { DISCORD_SYMBOL, KO_FI_SYMBOL } from "@/assets";
 import { useI18n } from "@/shared/lib/i18n";
 import {
   Tooltip,
@@ -7,16 +6,9 @@ import {
   TooltipTrigger,
 } from "@/shared/components/ui/tooltip";
 import { useAvailableUpdate, useBenchmarks } from "@/shared/hooks";
-import {
-  benchmarkPath,
-  cn,
-  EXTERNAL_LINKS,
-  getVersion,
-  openURL,
-} from "@/shared/lib";
+import { benchmarkPath, cn, getVersion } from "@/shared/lib";
 import {
   Activity,
-  HelpCircle,
   LayoutGrid,
   PanelLeft,
   Settings,
@@ -24,6 +16,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+
+import { SidebarPlaytime } from "./SidebarPlaytime";
 
 type SidebarProps = {
   open: boolean;
@@ -318,36 +312,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
             aria-label={t("common.nav.secondary")}
             className="flex flex-col gap-1"
           >
-            <SidebarItem
-              icon={
-                <img
-                  src={DISCORD_SYMBOL}
-                  alt=""
-                  className="size-[1.125rem] shrink-0"
-                />
-              }
-              label="Discord"
-              onClick={() => openURL(EXTERNAL_LINKS.discord)}
-              open={open}
-            />
-            <SidebarItem
-              icon={<HelpCircle />}
-              label={t("common.nav.help")}
-              onClick={() => openURL(EXTERNAL_LINKS.docs)}
-              open={open}
-            />
-            <SidebarItem
-              icon={
-                <img
-                  src={KO_FI_SYMBOL}
-                  alt=""
-                  className="size-[1.125rem] shrink-0"
-                />
-              }
-              label={t("common.nav.support")}
-              onClick={() => openURL(EXTERNAL_LINKS.support)}
-              open={open}
-            />
+            <SidebarPlaytime open={open} />
             <SidebarItem
               active={location.pathname === "/settings"}
               icon={<Settings />}
