@@ -96,6 +96,11 @@ func (s *Store) setReplayStatus(runPath, state, message string) {
 // transitions are worth an event.
 func (s *Store) publishReplayStatus(runPath, state, message string) {
 	s.setReplayStatus(runPath, state, message)
+	if state == models.ReplayStateReady {
+		// The clock inside the clip has to be copied out now; the size cap
+		// will delete the clip long before anyone asks for it again.
+		go s.recordSessionTimer(runPath)
+	}
 	if s.ctx == nil {
 		return
 	}

@@ -7,13 +7,26 @@ import {
   placementLabel,
   type ScenarioCategory,
 } from "./scenarioCategories";
+import { useSessionTimers, type SessionTimers } from "./sessionTimers";
 
 /**
  * Today's play, per scenario, gathered into aim categories.
  *
- * Time comes from each run's recorded duration, which has paused time taken
- * out of it, so this is time spent playing rather than time the scenario was
- * open.
+ * Time comes from two places, and which one is in use is reported rather than
+ * hidden. KovaaK's runs an on-screen clock per scenario that counts the time
+ * actually spent in it - restarts and abandoned attempts included - and that
+ * clock is read back out of each replay. Where it is available it is the
+ * truth, and it is materially larger than what the stats files describe: on
+ * one measured block of thirteen runs it read 18:05 against the 12:52 the
+ * finished runs account for.
+ *
+ * Where it is not available the finished runs are summed instead, which is
+ * the old behaviour and an undercount. The two are never blended silently:
+ * the breakdown says how many of the day's blocks were measured.
+ *
+ * A block is a stretch of consecutive runs of one scenario, because that is
+ * exactly the span the clock covers - it resets whenever the scenario
+ * changes, including on returning to one played earlier the same day.
  *
  * Scenarios whose category is unknown are not distributed, guessed at, or
  * quietly dropped - they are kept in their own group, and the share of the
@@ -53,10 +66,22 @@ export type TodayBreakdown = {
   knownSeconds: number;
   runs: number;
   sections: BreakdownSection[];
+  /** Stretches of one scenario, and how many had their clock read. */
+  blocks: number;
+  measuredBlocks: number;
+  /** Why the unmeasured blocks were unmeasured, most common first. */
+  failureReasons: string[];
 };
 
-const CONFLICT_KEY = "conflict";
-const UNKNOWN_KEY = "unknown";
+const CONFLICT_KEY = "conflict";
+const UNKNOWN_KEY = "unknown";
+
+type TodayRun = {
+  fileName: string;
+  scenario: string;
+  seconds: number;
+  playedAt: number;
+};
 
 function startOfToday(): number {
   const d = new Date();
@@ -100,9 +125,11 @@ export function useTodayBreakdown(
   index: Map<string, ScenarioCategory>,
 ): TodayBreakdown {
   const sessions = useStore((state) => state.sessions);
+  const timers = useSessionTimers();
   return useMemo(
-    () => buildTodayBreakdown(sessions, index, startOfToday(), Date.now()),
-    [sessions, index],
+    () =>
+      buildTodayBreakdown(sessions, index, timers, startOfToday(), Date.now()),
+    [sessions, index, timers],
   );
 }
 
@@ -110,31 +137,30 @@ export function useTodayBreakdown(
 export function buildTodayBreakdown(
   sessions: Session[],
   index: Map<string, ScenarioCategory>,
+  timers: SessionTimers,
   from: number,
   now: number,
 ): TodayBreakdown {
-  const perScenario = new Map<string, { seconds: number; runs: number }>();
-  let totalSeconds = 0;
-  let runs = 0;
+  const today: TodayRun[] = [];
   let sessionSeconds = 0;
   let sessionCount = 0;
 
   for (const session of sessions) {
     let runsToday = 0;
     for (const item of session.items) {
-      const played = Date.parse(String(item.stats?.summary.datePlayed ?? ""));
-      if (!Number.isFinite(played) || played < from) continue;
+      const playedAt = Date.parse(String(item.stats?.summary.datePlayed ?? ""));
+      if (!Number.isFinite(playedAt) || playedAt < from) continue;
       const seconds = Number(item.stats?.summary.duration ?? 0);
       if (!Number.isFinite(seconds) || seconds <= 0) continue;
 
-      const name = getScenarioName(item);
-      if (!name) continue;
-      const entry = perScenario.get(name) ?? { seconds: 0, runs: 0 };
-      entry.seconds += seconds;
-      entry.runs += 1;
-      perScenario.set(name, entry);
-      totalSeconds += seconds;
-      runs += 1;
+      const scenario = getScenarioName(item);
+      if (!scenario) continue;
+      today.push({
+        fileName: String(item.fileName ?? ""),
+        scenario,
+        seconds,
+        playedAt,
+      });
       runsToday += 1;
     }
     // A session that contributed nothing today contributes no time either,
@@ -143,6 +169,47 @@ export function buildTodayBreakdown(
       sessionCount += 1;
       sessionSeconds += sessionSecondsToday(session, from, now);
     }
+  }
+
+  // The clock is per stretch of one scenario, so the runs have to be in the
+  // order they were played before they can be cut into stretches.
+  today.sort((a, b) => a.playedAt - b.playedAt);
+  const blocks: TodayRun[][] = [];
+  for (const run of today) {
+    const last = blocks[blocks.length - 1];
+    if (last && last[0].scenario === run.scenario) last.push(run);
+    else blocks.push([run]);
+  }
+
+  const perScenario = new Map<string, { seconds: number; runs: number }>();
+  const reasonCounts = new Map<string, number>();
+  let totalSeconds = 0;
+  let measuredBlocks = 0;
+
+  for (const block of blocks) {
+    const finished = block.reduce((sum, r) => sum + r.seconds, 0);
+    // The clock is cumulative across the stretch, so only the last run's
+    // reading describes the whole of it.
+    const measured = timers.seconds.get(block[block.length - 1].fileName);
+    let seconds = finished;
+    if (typeof measured === "number" && measured >= finished) {
+      seconds = measured;
+      measuredBlocks += 1;
+    } else {
+      // A reading below the finished runs would mean the stretch was cut
+      // differently from how the game counted it, so it is not believed.
+      for (const run of block) {
+        const reason = timers.reasons.get(run.fileName);
+        if (reason)
+          reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+      }
+    }
+
+    const entry = perScenario.get(block[0].scenario) ?? { seconds: 0, runs: 0 };
+    entry.seconds += seconds;
+    entry.runs += block.length;
+    perScenario.set(block[0].scenario, entry);
+    totalSeconds += seconds;
   }
 
   const sections = new Map<string, BreakdownSection>();
@@ -194,8 +261,13 @@ export function buildTodayBreakdown(
     sessions: sessionCount,
     totalSeconds,
     knownSeconds,
-    runs,
+    runs: today.length,
     sections: ordered,
+    blocks: blocks.length,
+    measuredBlocks,
+    failureReasons: [...reasonCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason]) => reason),
   };
 }
 

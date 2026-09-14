@@ -82,6 +82,10 @@ export function GetScreenCaptureInfo() {
   return window['go']['main']['App']['GetScreenCaptureInfo']();
 }
 
+export function GetSessionTimers() {
+  return window['go']['main']['App']['GetSessionTimers']();
+}
+
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }

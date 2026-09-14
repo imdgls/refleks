@@ -158,6 +158,15 @@ func (a *App) GetRecentRuns(limit int) []models.RunRecord {
 	return a.runsRuntimeSvc.GetRecent(limit)
 }
 
+// GetSessionTimers returns the KovaaK's session clock recorded for each run,
+// keyed by run file name, together with the reason where one could not be read.
+func (a *App) GetSessionTimers() map[string]runs.SessionTimerEntry {
+	if a.runStore == nil {
+		return map[string]runs.SessionTimerEntry{}
+	}
+	return a.runStore.SessionTimers()
+}
+
 // GetRunStatsEvents returns the CSV-derived event rows nested under stats.events.
 // They are loaded on demand instead of being included in the bulk recent-runs payload.
 func (a *App) GetRunStatsEvents(filePath string) ([]models.RunStatsEvent, error) {

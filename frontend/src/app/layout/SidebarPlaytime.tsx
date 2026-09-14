@@ -197,6 +197,45 @@ export function SidebarPlaytime({ open }: { open: boolean }) {
   );
 }
 
+/**
+ * Says whether the day's figure was measured or inferred.
+ *
+ * Where a stretch of one scenario has its on-screen clock read, that reading
+ * includes restarts and abandoned attempts; where it does not, the finished
+ * runs are summed and the figure is short by however much was abandoned. The
+ * two look identical on the page, so the count says which is which.
+ *
+ * When nothing was measured the reason is printed in full rather than tucked
+ * into a tooltip. There is no second chance to read a clip, so a reading that
+ * stops working - a changed resolution, the panel switched off - has to be
+ * impossible to miss on the day it happens.
+ */
+function MeasuredNote({
+  breakdown,
+}: {
+  breakdown: ReturnType<typeof useTodayBreakdown>;
+}) {
+  if (breakdown.blocks === 0) return null;
+  const all = breakdown.measuredBlocks === breakdown.blocks;
+  const none = breakdown.measuredBlocks === 0;
+
+  return (
+    <p
+      className={cn(
+        "pb-1.5 text-[0.625rem]",
+        none ? "text-warning" : "text-surface-muted-foreground",
+      )}
+    >
+      {all
+        ? `all ${breakdown.blocks} ${breakdown.blocks === 1 ? "block" : "blocks"} measured`
+        : `${breakdown.measuredBlocks} of ${breakdown.blocks} blocks measured`}
+      {!all && breakdown.failureReasons.length > 0 && (
+        <span className="block">{breakdown.failureReasons[0]}</span>
+      )}
+    </p>
+  );
+}
+
 function TodayList({
   breakdown,
   categorised,
@@ -230,6 +269,8 @@ function TodayList({
               )} categorised (${categorised}%)`
             : "Categories not loaded - listing by scenario.")}
       </p>
+
+      <MeasuredNote breakdown={breakdown} />
 
       <div className="space-y-2">
         {breakdown.sections.map((section) => (
