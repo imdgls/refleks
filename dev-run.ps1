@@ -19,6 +19,12 @@
 .PARAMETER Watch
     Runs `wails dev` (hot reload) instead of the compiled binary.
 
+.NOTES
+    Launched from Steam, use dev-run.vbs rather than this script directly:
+    Steam's launch options need a shell to chain the app in front of the
+    game, and cmd.exe brings a console window that stays on screen for the
+    whole session. See the header of dev-run.vbs.
+
 .EXAMPLE
     .\dev-run.ps1
     .\dev-run.ps1 -Watch
@@ -68,7 +74,11 @@ if ($Watch) {
 } else {
     $exe = Join-Path $repoRoot 'build\bin\refleks.exe'
     if (-not (Test-Path $exe)) {
-        throw "No build found at $exe - run 'wails build' first."
+        # Started from Steam this runs with no console, so an error printed
+        # to the screen is an error nobody sees. Put it where the log is.
+        $missing = "No build found at $exe - run 'wails build' first."
+        Set-Content -Path $log -Value $missing -Encoding utf8
+        throw $missing
     }
     & cmd /c "`"$exe`" > `"$log`" 2>&1"
 }
