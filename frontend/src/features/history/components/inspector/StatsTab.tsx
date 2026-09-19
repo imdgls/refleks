@@ -11,6 +11,7 @@ import {
   formatSessionTitle,
   type HistoryRun,
 } from "../../lib/historyModels";
+import { BenchmarkProgressPanel } from "./BenchmarkProgressPanel";
 import {
   CompareMetric,
   CompareStatRow,
@@ -127,6 +128,11 @@ export function StatsTab({
           value={formatDurationLabel(primaryRun.durationMs)}
         />
       </div>
+
+      <BenchmarkProgressPanel
+        scenarioName={primaryRun.scenarioName}
+        runScore={primaryRun.score}
+      />
 
       {categories.map(({ category, stats }) => (
         <StatsGroup key={category} label={category}>
