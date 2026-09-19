@@ -226,6 +226,7 @@ export function ReplayTab({ primaryRun, compareRun }: Props) {
             primary
             scenarioName={primaryRun.scenarioName}
             runScore={primaryRun.score}
+            playedAt={primaryRun.playedAt}
             onDeleted={() => setPrimaryReplay(null)}
           />
           <ReplaySlot
@@ -254,6 +255,7 @@ export function ReplayTab({ primaryRun, compareRun }: Props) {
           primary
           scenarioName={primaryRun.scenarioName}
           runScore={primaryRun.score}
+          playedAt={primaryRun.playedAt}
           onDeleted={() => setPrimaryReplay(null)}
         />
       )}
@@ -272,6 +274,7 @@ function ReplaySlot({
   primary,
   scenarioName,
   runScore,
+  playedAt,
   onDeleted,
 }: {
   filePath: string;
@@ -282,9 +285,10 @@ function ReplaySlot({
   // Only the primary run carries the panels. A compare view is for looking
   // at two runs beside each other, not for analysing both at once.
   primary?: boolean;
-  /** Named and scored so the benchmark panel can place the run. */
+  /** Named, scored and dated so the benchmark panel can place the run. */
   scenarioName?: string;
   runScore?: number;
+  playedAt?: number;
   onDeleted: () => void;
 }) {
   const [fullscreen, setFullscreen] = useState(false);
@@ -343,6 +347,7 @@ function ReplaySlot({
           <BenchmarkLadderPanel
             scenarioName={scenarioName}
             runScore={runScore ?? 0}
+            playedAt={playedAt}
           />
         )}
       </div>
@@ -379,6 +384,7 @@ function ReplaySlot({
         <BenchmarkLadderPanel
           scenarioName={scenarioName}
           runScore={runScore ?? 0}
+          playedAt={playedAt}
         />
       )}
     </div>

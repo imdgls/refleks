@@ -41,6 +41,11 @@ export type ScenarioNormal = {
   spanDays: number;
   /** Best score ever recorded locally for this scenario. */
   localBest: number;
+  /**
+   * Best score recorded before the run being looked at, so a result can be
+   * told apart from the record it just set. Zero when nothing came before.
+   */
+  bestBefore: number;
   /** Runs on record for the scenario, however far back. */
   total: number;
 };
@@ -50,14 +55,18 @@ const NONE: ScenarioNormal = {
   runs: 0,
   spanDays: 0,
   localBest: 0,
+  bestBefore: 0,
   total: 0,
 };
 
-export function useScenarioNormal(scenarioName: string): ScenarioNormal {
+export function useScenarioNormal(
+  scenarioName: string,
+  playedAt?: number,
+): ScenarioNormal {
   const sessions = useStore((state) => state.sessions);
   return useMemo(
-    () => computeScenarioNormal(sessions, scenarioName),
-    [sessions, scenarioName],
+    () => computeScenarioNormal(sessions, scenarioName, playedAt),
+    [sessions, scenarioName, playedAt],
   );
 }
 
@@ -67,11 +76,13 @@ type Played = { at: number; score: number };
 export function computeScenarioNormal(
   sessions: Array<{ items: unknown[] }>,
   scenarioName: string,
+  playedAt?: number,
 ): ScenarioNormal {
   if (!scenarioName) return NONE;
 
   const played: Played[] = [];
   let localBest = 0;
+  let bestBefore = 0;
   for (const session of sessions) {
     for (const raw of session.items) {
       const item = raw as {
@@ -85,6 +96,10 @@ export function computeScenarioNormal(
       }
       played.push({ at, score });
       if (score > localBest) localBest = score;
+      // Strictly earlier, so a run is never counted as preceding itself.
+      if (playedAt !== undefined && at < playedAt && score > bestBefore) {
+        bestBefore = score;
+      }
     }
   }
 
@@ -94,7 +109,14 @@ export function computeScenarioNormal(
   const window = played.slice(-WINDOW);
   const total = played.length;
   if (window.length < MINIMUM) {
-    return { normal: null, runs: window.length, spanDays: 0, localBest, total };
+    return {
+      normal: null,
+      runs: window.length,
+      spanDays: 0,
+      localBest,
+      bestBefore,
+      total,
+    };
   }
 
   const scores = window.map((p) => p.score).sort((a, b) => a - b);
@@ -108,7 +130,14 @@ export function computeScenarioNormal(
     (window[window.length - 1].at - window[0].at) / 86_400_000,
   );
 
-  return { normal, runs: window.length, spanDays, localBest, total };
+  return {
+    normal,
+    runs: window.length,
+    spanDays,
+    localBest,
+    bestBefore,
+    total,
+  };
 }
 
 /**

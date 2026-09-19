@@ -1,4 +1,7 @@
-import { computeFillColor } from "@/features/benchmarks/lib/detailFormatting";
+import {
+  cellFill,
+  computeFillColor,
+} from "@/features/benchmarks/lib/detailFormatting";
 import {
   Tooltip,
   TooltipContent,
@@ -7,6 +10,7 @@ import {
 } from "@/shared/components/ui/tooltip";
 import { useBenchmarks, usePersistedState } from "@/shared/hooks";
 import { cn } from "@/shared/lib";
+import type { RankDef } from "@/shared/types";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -30,22 +34,22 @@ import {
  * marked inside it.
  *
  * The point is placement rather than a single figure: seeing the scenario in
- * its category and subcategory says where this result sits in the whole
- * ladder, which a lone bar cannot.
+ * its category and subcategory says where a result sits in the whole ladder,
+ * which a lone bar cannot.
  *
  * One benchmark is listed at a time, because a scenario can belong to seven
  * of them and stacking those is 152 rows under a video. Nothing is chosen on
- * the player's behalf, though: every benchmark gets a tab, and each tab
- * carries the rank the scenario holds there, so the spread - Celadon in one
- * ladder, unranked in the next - is readable without switching.
+ * the player's behalf even so: every benchmark gets a tab carrying the rank
+ * the scenario holds there, so the spread is readable without switching.
  *
- * Only the played scenario's row carries the run and the normal. For every
- * other row those two do not exist, and inventing them would be inventing
- * data. That is also what makes the marked row legible at a glance.
+ * The thresholds are printed on the played scenario's row only. They would
+ * fit everywhere - even a thirteen-rank ladder leaves forty pixels a segment
+ * - but a list of thirty-nine rows would then carry some three hundred
+ * numbers, and none of them would be read. Any other row gives up its
+ * thresholds on hover instead.
  *
- * Every row takes the higher of the local best and the one the server
- * recorded, so a list does not mix two definitions of "best" depending on
- * which happened to be fresher.
+ * That asymmetry is also what makes the played row stand out: it is a block
+ * of three lines among rows of one, which needs no decoration to find.
  */
 
 const STORE_OPEN = "refleks.replay.ladder.open";
@@ -54,9 +58,11 @@ const STORE_PICK = "refleks.replay.ladder.benchmark";
 export function BenchmarkLadderPanel({
   scenarioName,
   runScore,
+  playedAt,
 }: {
   scenarioName: string;
   runScore: number;
+  playedAt?: number;
 }) {
   const { benchmarks, progressMap, loadAllProgress, favorites } =
     useBenchmarks();
@@ -76,45 +82,31 @@ export function BenchmarkLadderPanel({
     [benchmarks, progressMap, favorites],
   );
   const lists = byScenario.get(scenarioName) ?? [];
-  const normal = useScenarioNormal(scenarioName);
+  const normal = useScenarioNormal(scenarioName, playedAt);
   const localBests = useLocalBests();
 
-  // The remembered benchmark only applies where it actually holds the
-  // scenario; otherwise the ordering decides.
+  // The remembered benchmark applies only where it holds the scenario;
+  // otherwise the ordering decides.
   const selected = lists.find((l) => l.key === pick) ?? lists[0] ?? null;
   const loading =
     benchmarks.length === 0 || Object.keys(progressMap).length === 0;
 
   return (
     <div className="rounded-xl bg-surface-subtle">
-      <div className="flex items-center gap-1.5 px-2 py-1">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex min-w-0 items-center gap-1 text-[0.6875rem] font-medium uppercase tracking-wider text-surface-muted-foreground hover:text-foreground"
-        >
-          <ChevronDown
-            className={cn(
-              "h-3 w-3 transition-transform",
-              open ? "" : "-rotate-90",
-            )}
-          />
-          Benchmarks
-        </button>
-        {open && lists.length > 0 && (
-          <div className="ml-auto">
-            <NormalSummary
-              runScore={runScore}
-              normal={normal}
-              best={Math.max(
-                normal.localBest,
-                bestInList(selected, scenarioName),
-              )}
-            />
-          </div>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1 px-2 py-1 text-[0.6875rem] font-medium uppercase tracking-wider text-surface-muted-foreground hover:text-foreground"
+      >
+        <ChevronDown
+          className={cn(
+            "h-3 w-3 transition-transform",
+            open ? "" : "-rotate-90",
+          )}
+        />
+        Benchmarks
+      </button>
 
       {open && (
         <div className="px-2 pb-2">
@@ -146,7 +138,7 @@ export function BenchmarkLadderPanel({
                 list={selected}
                 scenarioName={scenarioName}
                 runScore={runScore}
-                normal={normal.normal}
+                normal={normal}
                 localBests={localBests}
               />
             </>
@@ -155,11 +147,6 @@ export function BenchmarkLadderPanel({
       )}
     </div>
   );
-}
-
-function bestInList(list: BenchmarkList | null, scenarioName: string): number {
-  if (!list) return 0;
-  return findInList(list, scenarioName)?.apiScore ?? 0;
 }
 
 function bestFor(
@@ -220,11 +207,10 @@ function BenchmarkTab({
 }
 
 /**
- * The list itself, with the played scenario kept findable.
+ * The list, with the played scenario kept findable.
  *
- * A long ladder scrolls, and a marked row that has scrolled out of sight is
- * no better than an unmarked one, so the panel says which way it went and
- * offers to go back to it.
+ * A marked row that has scrolled out of sight is no better than an unmarked
+ * one, so the list centres it and, once it leaves, says which way it went.
  */
 function LadderList({
   list,
@@ -236,7 +222,7 @@ function LadderList({
   list: BenchmarkList;
   scenarioName: string;
   runScore: number;
-  normal: number | null;
+  normal: ScenarioNormal;
   localBests: Map<string, number>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -253,8 +239,6 @@ function LadderList({
     });
   };
 
-  // Centre the marked row whenever the list changes, so opening a benchmark
-  // never starts with a hunt.
   useLayoutEffect(() => {
     scrollToRow(false);
   }, [list.key, scenarioName]);
@@ -284,9 +268,9 @@ function LadderList({
   }, [list.key, scenarioName]);
 
   const entry = findInList(list, scenarioName);
-  const marked = entry ? bestFor(entry, localBests) : 0;
+  const markedBest = entry ? bestFor(entry, localBests) : 0;
   const markedRank = entry
-    ? rankName(marked, entry.thresholds, list.ranks)
+    ? rankName(markedBest, entry.thresholds, list.ranks)
     : null;
 
   const locator = (direction: "above" | "below") => (
@@ -314,7 +298,7 @@ function LadderList({
       {offscreen === "above" && locator("above")}
       <div
         ref={scrollRef}
-        className="relative max-h-[22rem] space-y-2 overflow-y-auto pr-1"
+        className="relative max-h-[24rem] space-y-2 overflow-y-auto pr-1"
       >
         {list.categories.map((category) => (
           <div key={category.name || "uncategorised"}>
@@ -330,21 +314,26 @@ function LadderList({
                     {group.name}
                   </div>
                 )}
-                {group.scenarios.map((scenario) => {
-                  const mine = scenario.name === scenarioName;
-                  return (
-                    <div key={scenario.name} ref={mine ? rowRef : undefined}>
-                      <LadderRow
+                {group.scenarios.map((scenario) =>
+                  scenario.name === scenarioName ? (
+                    <div key={scenario.name} ref={rowRef}>
+                      <MarkedRow
                         scenario={scenario}
                         ranks={list.ranks}
                         best={bestFor(scenario, localBests)}
-                        runScore={mine ? runScore : null}
-                        normal={mine ? normal : null}
-                        marked={mine}
+                        runScore={runScore}
+                        normal={normal}
                       />
                     </div>
-                  );
-                })}
+                  ) : (
+                    <CompactRow
+                      key={scenario.name}
+                      scenario={scenario}
+                      ranks={list.ranks}
+                      best={bestFor(scenario, localBests)}
+                    />
+                  ),
+                )}
               </div>
             ))}
           </div>
@@ -355,171 +344,401 @@ function LadderList({
   );
 }
 
+/* ─── The bar ─── */
+
 /**
- * One scenario's ladder.
+ * A ladder drawn as one cell per rank, which is how the benchmarks page
+ * draws it and what makes the thresholds readable: the cells are equal, so
+ * unevenly spaced scores do not make some ranks a sliver.
  *
- * The axis gives every rank an equal share rather than spacing them by score,
- * because thresholds are spaced unevenly and a score-linear axis would draw
- * some ranks wide and others a sliver.
+ * Cells carry their own fill rather than one bar being filled across them,
+ * which is the same picture and lets a threshold sit inside its cell with a
+ * legible colour on both sides of the fill edge.
  */
-function LadderRow({
+function LadderBar({
+  thresholds,
+  ranks,
+  best,
+  showNumbers,
+  tall,
+  children,
+}: {
+  thresholds: number[];
+  ranks: RankDef[];
+  best: number;
+  showNumbers: boolean;
+  tall: boolean;
+  children?: React.ReactNode;
+}) {
+  const bands = Math.max(0, thresholds.length - 1);
+  const fillColor = computeFillColor(rankForScore(best, thresholds), ranks);
+
+  return (
+    <div className={cn("relative w-full", tall ? "h-[1.375rem]" : "h-2.5")}>
+      <div
+        className="absolute inset-0 grid overflow-hidden rounded-md"
+        style={{ gridTemplateColumns: `repeat(${bands}, minmax(0, 1fr))` }}
+      >
+        {Array.from({ length: bands }, (_, i) => {
+          const fill = cellFill(i, best, thresholds);
+          const pct = Math.round(fill * 100);
+          const label = formatScore(thresholds[i + 1]);
+          return (
+            <div
+              key={i}
+              className={cn(
+                "relative flex items-center justify-center overflow-hidden bg-surface-panel",
+                i > 0 && "border-l border-canvas/70",
+              )}
+            >
+              <div
+                className="absolute inset-y-0 left-0"
+                style={{ width: `${pct}%`, background: fillColor }}
+              />
+              {showNumbers && (
+                <>
+                  <span className="relative z-10 text-[0.5625rem] tabular-nums text-foreground/70">
+                    {label}
+                  </span>
+                  {/* The same number again, clipped to the filled part, so it
+                      stays legible where the fill runs under it. */}
+                  {pct > 0 && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 z-20 flex items-center justify-center text-[0.5625rem] font-medium tabular-nums text-canvas"
+                      style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}
+                    >
+                      {label}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Every row that is not the one played: the ladder, filled, and nothing else. */
+function CompactRow({
+  scenario,
+  ranks,
+  best,
+}: {
+  scenario: LadderScenario;
+  ranks: RankDef[];
+  best: number;
+}) {
+  const earned = rankName(best, scenario.thresholds, ranks);
+  const fillColor = computeFillColor(
+    rankForScore(best, scenario.thresholds),
+    ranks,
+  );
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex cursor-default items-center gap-2 py-0.5 pl-2 pr-1">
+            <span
+              className="w-[11rem] shrink-0 truncate text-[0.6875rem] text-surface-foreground"
+              title={scenario.name}
+            >
+              {scenario.name}
+            </span>
+            <div className="min-w-0 flex-1">
+              <LadderBar
+                thresholds={scenario.thresholds}
+                ranks={ranks}
+                best={best}
+                showNumbers={false}
+                tall={false}
+              />
+            </div>
+            <span
+              className="w-[4.5rem] shrink-0 truncate text-right text-[0.625rem]"
+              style={earned ? { color: fillColor } : undefined}
+            >
+              {earned ?? "–"}
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[20rem]">
+          <div className="text-[0.6875rem] leading-relaxed">
+            <div className="font-medium">{scenario.name}</div>
+            <div className="text-popover-foreground/70">
+              Best {formatScore(best)} · thresholds{" "}
+              {scenario.thresholds
+                .slice(1)
+                .map((t) => formatScore(t))
+                .join(" · ")}
+            </div>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/**
+ * The played scenario: the ladder with its thresholds, the three figures
+ * that describe this result, and what is left to the next rank.
+ *
+ * The figures sit in a fixed key line rather than beside their markers.
+ * Normal, this run and the record are three samples of the same player on
+ * the same scenario, so they cluster: on one real row they spanned 8.7% of
+ * the bar where three labels need about 24%. The bar says where they are,
+ * the key says what they are, and the order never changes.
+ */
+function MarkedRow({
   scenario,
   ranks,
   best,
   runScore,
   normal,
-  marked,
 }: {
   scenario: LadderScenario;
-  ranks: Array<{ name?: string; color?: string }>;
+  ranks: RankDef[];
   best: number;
-  runScore: number | null;
-  normal: number | null;
-  marked: boolean;
+  runScore: number;
+  normal: ScenarioNormal;
 }) {
   const { thresholds } = scenario;
-  const bands = thresholds.length - 1;
+  const earned = rankName(best, thresholds, ranks);
   const fillColor = computeFillColor(rankForScore(best, thresholds), ranks);
-  const earned = rankName(best, thresholds, ranks as never);
   const pct = (value: number) =>
     `${(rankPosition(value, thresholds) * 100).toFixed(2)}%`;
 
+  // A run that beat everything before it is the record, and saying so once
+  // is better than printing the same number twice under two names.
+  const isRecord = runScore >= best;
+  const isNewRecord = runScore > normal.bestBefore && normal.bestBefore > 0;
+  const isFirstEver = normal.bestBefore === 0;
+
+  const runRank = rankForScore(runScore, thresholds);
+  const nextThreshold =
+    runRank + 1 < thresholds.length ? thresholds[runRank + 1] : null;
+  const nextRankName = ranks[runRank]?.name ?? null;
+  const toNext =
+    nextThreshold !== null && runScore > 0
+      ? ((nextThreshold - runScore) / runScore) * 100
+      : null;
+
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2 rounded-md py-0.5 pr-1",
-        marked ? "bg-primary/10 pl-1" : "pl-2",
-      )}
-    >
-      {marked && (
+    <div className="my-1 rounded-lg bg-primary/10 py-1.5 pl-1 pr-1 ring-1 ring-primary/30">
+      <div className="flex items-center gap-2 pb-1">
         <span
           aria-hidden
-          className="h-3 w-0.5 shrink-0 rounded-full bg-primary"
+          className="h-3.5 w-1 shrink-0 rounded-full bg-primary"
         />
-      )}
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate text-[0.6875rem]",
-          marked ? "font-medium text-foreground" : "text-surface-foreground",
-        )}
-        title={scenario.name}
-      >
-        {scenario.name}
-      </span>
-
-      <div className="relative h-3.5 w-[9rem] shrink-0 sm:w-[12rem]">
-        <div className="absolute inset-x-0 top-1 h-2 overflow-hidden rounded-full bg-surface-panel">
-          <div
-            className="absolute inset-y-0 left-0"
-            style={{ width: pct(best), background: fillColor }}
-          />
-          {Array.from({ length: Math.max(0, bands - 1) }, (_, i) => (
-            <div
-              key={i}
-              className="absolute inset-y-0 w-px bg-canvas/50"
-              style={{ left: `${((i + 1) / bands) * 100}%` }}
-            />
-          ))}
-          {normal !== null && (
-            <div
-              className="absolute inset-y-0 w-px bg-foreground/40"
-              style={{ left: pct(normal) }}
-              aria-hidden
-            />
-          )}
-        </div>
-        {runScore !== null && (
-          <>
-            <div
-              className="absolute top-0 h-3.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
-              style={{
-                left: pct(runScore),
-                boxShadow: "0 0 0 1px var(--canvas)",
-              }}
-              aria-hidden
-            />
-            <div
-              className="absolute top-[0.75rem] size-0 -translate-x-1/2 border-x-[3px] border-b-[4px] border-x-transparent"
-              style={{
-                left: pct(runScore),
-                borderBottomColor: "var(--foreground)",
-              }}
-              aria-hidden
-            />
-          </>
-        )}
+        <span
+          className="min-w-0 flex-1 truncate text-[0.75rem] font-semibold text-foreground"
+          title={scenario.name}
+        >
+          {scenario.name}
+        </span>
+        <span
+          className="shrink-0 text-[0.6875rem] font-medium"
+          style={earned ? { color: fillColor } : undefined}
+        >
+          {earned ?? "unranked"}
+        </span>
+        <HoverDetail
+          scenario={scenario}
+          best={best}
+          runScore={runScore}
+          normal={normal}
+          nextThreshold={nextThreshold}
+          nextRankName={nextRankName}
+        />
       </div>
 
-      <span
-        className="w-[4.5rem] shrink-0 truncate text-right text-[0.625rem]"
-        style={earned ? { color: fillColor } : undefined}
-      >
-        {earned ?? "–"}
-      </span>
+      <Key
+        normal={normal.normal}
+        runScore={runScore}
+        best={best}
+        isRecord={isRecord}
+        isNewRecord={isNewRecord}
+        isFirstEver={isFirstEver}
+        toNext={toNext}
+        nextRankName={nextRankName}
+        fillColor={fillColor}
+      />
+
+      <div className="pl-2 pr-1 pt-1">
+        <LadderBar
+          thresholds={thresholds}
+          ranks={ranks}
+          best={best}
+          showNumbers
+          tall
+        >
+          {normal.normal !== null && (
+            <div
+              aria-hidden
+              title="your normal"
+              className="pointer-events-none absolute inset-y-0 w-[5px] -translate-x-1/2 rounded-sm bg-foreground/35"
+              style={{ left: pct(normal.normal) }}
+            />
+          )}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
+            style={{
+              left: pct(runScore),
+              boxShadow: "0 0 0 1px var(--canvas)",
+            }}
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -bottom-1 size-0 -translate-x-1/2 border-x-[3px] border-b-[4px] border-x-transparent"
+            style={{
+              left: pct(runScore),
+              borderBottomColor: "var(--foreground)",
+            }}
+          />
+        </LadderBar>
+      </div>
     </div>
   );
 }
 
-/** How this run compared with normal; the provenance waits for a hover. */
-function NormalSummary({
+/** The fixed key: always the same items in the same order. */
+function Key({
+  normal,
+  runScore,
+  best,
+  isRecord,
+  isNewRecord,
+  isFirstEver,
+  toNext,
+  nextRankName,
+  fillColor,
+}: {
+  normal: number | null;
+  runScore: number;
+  best: number;
+  isRecord: boolean;
+  isNewRecord: boolean;
+  isFirstEver: boolean;
+  toNext: number | null;
+  nextRankName: string | null;
+  fillColor: string;
+}) {
+  const target =
+    toNext === null
+      ? "top rank"
+      : `${toNext.toFixed(toNext < 10 ? 1 : 0)}% to ${nextRankName ?? "next"}`;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-3 text-[0.625rem]">
+      {normal !== null && (
+        <span className="flex items-center gap-1 text-surface-muted-foreground">
+          <span
+            aria-hidden
+            className="h-2 w-[5px] shrink-0 rounded-sm bg-foreground/35"
+          />
+          normal <span className="tabular-nums">{formatScore(normal)}</span>
+        </span>
+      )}
+
+      {/* When the run is the record the two are one number, so they are said
+          once - and the occasion is worth naming rather than hiding. */}
+      {isRecord ? (
+        <span className="flex items-center gap-1 font-medium text-foreground">
+          <span
+            aria-hidden
+            className="h-2.5 w-0.5 shrink-0 rounded-full bg-foreground"
+          />
+          {isFirstEver ? "first run" : isNewRecord ? "new record" : "record"}{" "}
+          <span className="tabular-nums">{formatScore(runScore)}</span>
+        </span>
+      ) : (
+        <>
+          <span className="flex items-center gap-1 font-medium text-foreground">
+            <span
+              aria-hidden
+              className="h-2.5 w-0.5 shrink-0 rounded-full bg-foreground"
+            />
+            this run{" "}
+            <span className="tabular-nums">{formatScore(runScore)}</span>
+          </span>
+          <span className="flex items-center gap-1 text-surface-muted-foreground">
+            <span
+              aria-hidden
+              className="h-2 w-2 shrink-0 rounded-sm"
+              style={{ background: fillColor }}
+            />
+            record <span className="tabular-nums">{formatScore(best)}</span>
+          </span>
+        </>
+      )}
+
+      <span className="text-primary">{target}</span>
+    </div>
+  );
+}
+
+/** Everything that does not earn a place on the row itself. */
+function HoverDetail({
+  scenario,
+  best,
   runScore,
   normal,
-  best,
+  nextThreshold,
+  nextRankName,
 }: {
+  scenario: LadderScenario;
+  best: number;
   runScore: number;
   normal: ScenarioNormal;
-  best: number;
+  nextThreshold: number | null;
+  nextRankName: string | null;
 }) {
-  if (normal.normal === null) {
-    return (
-      <span className="text-[0.6875rem] text-surface-muted-foreground">
-        {normal.runs > 0 ? `${normal.runs} runs on record` : "no history"}
-      </span>
-    );
-  }
-
-  const delta = ((runScore - normal.normal) / normal.normal) * 100;
   const ofBest = best > 0 ? (runScore / best) * 100 : null;
 
   return (
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="flex cursor-default items-baseline gap-2">
-            <span
-              className={cn(
-                "text-[0.6875rem] font-medium tabular-nums",
-                delta >= 0 ? "text-success" : "text-warning",
-              )}
-            >
-              {delta >= 0 ? "+" : ""}
-              {delta.toFixed(1)}% vs normal
-            </span>
-            <span className="text-[0.6875rem] tabular-nums text-surface-muted-foreground">
-              {formatScore(normal.normal)}
-            </span>
+          <span className="shrink-0 cursor-default rounded px-1 text-[0.625rem] text-surface-muted-foreground hover:text-foreground">
+            details
           </span>
         </TooltipTrigger>
-        <TooltipContent side="left" className="max-w-[17rem]">
+        <TooltipContent side="top" className="max-w-[20rem]">
           <div className="space-y-1 text-[0.6875rem] leading-relaxed">
-            <div>
-              Normal:{" "}
-              <span className="tabular-nums">{formatScore(normal.normal)}</span>{" "}
-              <span className="text-popover-foreground/70">
-                (median of {normal.runs} run{normal.runs === 1 ? "" : "s"}
-                {normal.spanDays > 0 ? ` over ${normal.spanDays} days` : ""})
-              </span>
-            </div>
-            <div>
-              This run:{" "}
-              <span className="tabular-nums">{formatScore(runScore)}</span>
-              {ofBest !== null && (
-                <span className="text-popover-foreground/70">
-                  {" "}
-                  — {ofBest.toFixed(0)}% of your best {formatScore(best)}
+            <div className="font-medium">{scenario.name}</div>
+            {ofBest !== null && (
+              <div>
+                This run reached{" "}
+                <span className="tabular-nums">{ofBest.toFixed(0)}%</span> of
+                your record.
+              </div>
+            )}
+            {normal.normal !== null && (
+              <div className="text-popover-foreground/70">
+                Normal is the median of {normal.runs} run
+                {normal.runs === 1 ? "" : "s"}
+                {normal.spanDays > 0 ? ` over ${normal.spanDays} days` : ""}, of{" "}
+                {normal.total} on record.
+              </div>
+            )}
+            {nextThreshold !== null && (
+              <div className="text-popover-foreground/70">
+                {nextRankName ?? "Next rank"} needs{" "}
+                <span className="tabular-nums">
+                  {formatScore(nextThreshold)}
                 </span>
-              )}
-            </div>
+                , which is{" "}
+                <span className="tabular-nums">
+                  {formatScore(nextThreshold - runScore)}
+                </span>{" "}
+                more than this run.
+              </div>
+            )}
           </div>
         </TooltipContent>
       </Tooltip>
