@@ -232,6 +232,13 @@ function CompareStatsView({
         </div>
       </div>
 
+      {/* Comparing two runs is exactly when the ladders are worth seeing, so
+          the panel follows the pinned run rather than disappearing. */}
+      <BenchmarkProgressPanel
+        scenarioName={primaryRun.scenarioName}
+        runScore={primaryRun.score}
+      />
+
       {(() => {
         const ttkA = readNumericStat(primaryRun, "avgTtk");
         const ttkB = readNumericStat(compareRun, "avgTtk");
