@@ -16,16 +16,25 @@ import type { Benchmark, BenchmarkProgress, RankDef } from "@/shared/types";
  * wrong three times out of four.
  */
 
-export type BenchmarkMembership = {
+export type LadderScenario = {
+  name: string;
+  thresholds: number[];
+  /** The score the benchmark recorded, which is the player's best there. */
+  apiScore: number;
+};
+
+export type LadderGroup = { name: string; scenarios: LadderScenario[] };
+export type LadderCategory = { name: string; groups: LadderGroup[] };
+
+export type BenchmarkList = {
+  key: string;
   benchmarkName: string;
   difficultyName: string;
-  benchmarkId: number;
-  /** Rank boundaries; see rankForScore for what the entries mean. */
-  thresholds: number[];
   ranks: RankDef[];
-  /** The score the benchmark recorded, which is the player's best. */
-  apiScore: number;
+  categories: LadderCategory[];
   favorite: boolean;
+  /** How far along this ladder the player is, used only for ordering. */
+  reach: number;
 };
 
 /**
@@ -83,60 +92,114 @@ export function rankPosition(score: number, thresholds: number[]): number {
 }
 
 /** The name of the rank a score has earned, or null below the first one. */
-export function rankName(score: number, m: BenchmarkMembership): string | null {
-  const rank = rankForScore(score, m.thresholds);
+export function rankName(
+  score: number,
+  thresholds: number[],
+  ranks: RankDef[],
+): string | null {
+  const rank = rankForScore(score, thresholds);
   if (rank <= 0) return null;
-  return m.ranks[rank - 1]?.name ?? null;
+  return ranks[rank - 1]?.name ?? null;
 }
 
-export function buildMembershipIndex(
+export type BenchmarkLists = {
+  /** Every list, in no particular order. */
+  all: BenchmarkList[];
+  /** The lists containing a scenario, best first. */
+  byScenario: Map<string, BenchmarkList[]>;
+};
+
+/**
+ * Every benchmark list, kept whole, plus an index from scenario to the lists
+ * that contain it.
+ *
+ * The lists are shared by reference rather than copied per scenario: 248
+ * difficulties of a dozen or more scenarios each is not large, but copying
+ * one per membership would be.
+ */
+export function buildBenchmarkLists(
   benchmarks: Benchmark[],
   progressMap: Record<number, BenchmarkProgress>,
   favorites: string[] = [],
-): Map<string, BenchmarkMembership[]> {
+): BenchmarkLists {
   const favorite = new Set(favorites);
-  const out = new Map<string, BenchmarkMembership[]>();
+  const all: BenchmarkList[] = [];
+  const byScenario = new Map<string, BenchmarkList[]>();
 
   for (const benchmark of benchmarks) {
     for (const difficulty of benchmark.difficulties ?? []) {
       const progress = progressMap[difficulty.kovaaksBenchmarkId];
       if (!progress) continue;
 
+      const categories: LadderCategory[] = [];
+      const members: string[] = [];
+      let reachSum = 0;
+      let reachCount = 0;
+
       for (const category of progress.categories ?? []) {
+        const groups: LadderGroup[] = [];
         for (const group of category.groups ?? []) {
+          const scenarios: LadderScenario[] = [];
           for (const scenario of group.scenarios ?? []) {
             const thresholds = scenario.thresholds ?? [];
-            // A ladder needs at least a floor and one rank to be drawable.
+            // A ladder needs a floor and at least one rank to be drawable.
             if (!scenario.name || thresholds.length < 2) continue;
-
-            const entry: BenchmarkMembership = {
-              benchmarkName: benchmark.benchmarkName,
-              difficultyName: difficulty.difficultyName,
-              benchmarkId: difficulty.kovaaksBenchmarkId,
-              thresholds,
-              ranks: progress.ranks ?? [],
-              apiScore: Number(scenario.score ?? 0),
-              favorite: favorite.has(benchmark.benchmarkName),
-            };
-            const list = out.get(scenario.name);
-            if (list) list.push(entry);
-            else out.set(scenario.name, [entry]);
+            const apiScore = Number(scenario.score ?? 0);
+            scenarios.push({ name: scenario.name, thresholds, apiScore });
+            members.push(scenario.name);
+            reachSum += rankPosition(apiScore, thresholds);
+            reachCount += 1;
+          }
+          if (scenarios.length > 0) {
+            groups.push({ name: (group.name ?? "").trim(), scenarios });
           }
         }
+        if (groups.length > 0) {
+          categories.push({ name: (category.name ?? "").trim(), groups });
+        }
+      }
+      if (categories.length === 0) continue;
+
+      const list: BenchmarkList = {
+        key: `${difficulty.kovaaksBenchmarkId}-${benchmark.benchmarkName}-${difficulty.difficultyName}`,
+        benchmarkName: benchmark.benchmarkName,
+        difficultyName: difficulty.difficultyName,
+        ranks: progress.ranks ?? [],
+        categories,
+        favorite: favorite.has(benchmark.benchmarkName),
+        reach: reachCount > 0 ? reachSum / reachCount : 0,
+      };
+      all.push(list);
+      for (const name of members) {
+        const bucket = byScenario.get(name);
+        if (bucket) bucket.push(list);
+        else byScenario.set(name, [list]);
       }
     }
   }
 
-  for (const list of out.values()) {
-    // Favourites first, then the ladder the player is furthest along, which
-    // puts the benchmark they are actually working through at the top.
-    list.sort((a, b) => {
+  for (const bucket of byScenario.values()) {
+    // Favourites first, then the ladder the player has come furthest along,
+    // so the benchmark actually being worked through leads.
+    bucket.sort((a, b) => {
       if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-      return (
-        rankPosition(b.apiScore, b.thresholds) -
-        rankPosition(a.apiScore, a.thresholds)
-      );
+      return b.reach - a.reach;
     });
   }
-  return out;
+  return { all, byScenario };
+}
+
+/** Finds a scenario's entry inside a list, or null when it is not there. */
+export function findInList(
+  list: BenchmarkList,
+  scenarioName: string,
+): LadderScenario | null {
+  for (const category of list.categories) {
+    for (const group of category.groups) {
+      for (const scenario of group.scenarios) {
+        if (scenario.name === scenarioName) return scenario;
+      }
+    }
+  }
+  return null;
 }

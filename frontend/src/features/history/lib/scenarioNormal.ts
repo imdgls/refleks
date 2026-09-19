@@ -110,3 +110,30 @@ export function computeScenarioNormal(
 
   return { normal, runs: window.length, spanDays, localBest, total };
 }
+
+/**
+ * The best score recorded locally for every scenario.
+ *
+ * The benchmark data carries a best of its own, but a personal best set
+ * minutes ago can lead the server by a refresh. Taking the higher of the two
+ * everywhere keeps one answer in the list rather than a different truth per
+ * row depending on which happened to be fresher.
+ */
+export function useLocalBests(): Map<string, number> {
+  const sessions = useStore((state) => state.sessions);
+  return useMemo(() => {
+    const best = new Map<string, number>();
+    for (const session of sessions) {
+      for (const raw of session.items) {
+        const name = getScenarioName(raw as never);
+        if (!name) continue;
+        const item = raw as { stats?: { summary?: { score?: unknown } } };
+        const score = Number(item.stats?.summary?.score ?? 0);
+        if (!Number.isFinite(score) || score <= 0) continue;
+        const current = best.get(name);
+        if (current === undefined || score > current) best.set(name, score);
+      }
+    }
+    return best;
+  }, [sessions]);
+}

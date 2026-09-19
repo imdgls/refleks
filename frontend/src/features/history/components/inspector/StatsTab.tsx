@@ -11,7 +11,6 @@ import {
   formatSessionTitle,
   type HistoryRun,
 } from "../../lib/historyModels";
-import { BenchmarkProgressPanel } from "./BenchmarkProgressPanel";
 import {
   CompareMetric,
   CompareStatRow,
@@ -129,11 +128,6 @@ export function StatsTab({
         />
       </div>
 
-      <BenchmarkProgressPanel
-        scenarioName={primaryRun.scenarioName}
-        runScore={primaryRun.score}
-      />
-
       {categories.map(({ category, stats }) => (
         <StatsGroup key={category} label={category}>
           {stats.map((s) => (
@@ -231,13 +225,6 @@ function CompareStatsView({
           </Button>
         </div>
       </div>
-
-      {/* Comparing two runs is exactly when the ladders are worth seeing, so
-          the panel follows the pinned run rather than disappearing. */}
-      <BenchmarkProgressPanel
-        scenarioName={primaryRun.scenarioName}
-        runScore={primaryRun.score}
-      />
 
       {(() => {
         const ttkA = readNumericStat(primaryRun, "avgTtk");

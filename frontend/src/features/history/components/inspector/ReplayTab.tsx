@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HistoryRun } from "../../lib/historyModels";
+import { BenchmarkLadderPanel } from "./BenchmarkLadderPanel";
 import { ReplayInsights } from "./ReplayInsights";
 import { ReplayTrailOverlay } from "./ReplayTrailOverlay";
 
@@ -223,6 +224,8 @@ export function ReplayTab({ primaryRun, compareRun }: Props) {
             status={primaryStatus}
             label={t("history.inspector.primary")}
             primary
+            scenarioName={primaryRun.scenarioName}
+            runScore={primaryRun.score}
             onDeleted={() => setPrimaryReplay(null)}
           />
           <ReplaySlot
@@ -249,6 +252,8 @@ export function ReplayTab({ primaryRun, compareRun }: Props) {
           waiting={primaryWaiting}
           status={primaryStatus}
           primary
+          scenarioName={primaryRun.scenarioName}
+          runScore={primaryRun.score}
           onDeleted={() => setPrimaryReplay(null)}
         />
       )}
@@ -265,6 +270,8 @@ function ReplaySlot({
   status,
   label,
   primary,
+  scenarioName,
+  runScore,
   onDeleted,
 }: {
   filePath: string;
@@ -275,6 +282,9 @@ function ReplaySlot({
   // Only the primary run carries the panels. A compare view is for looking
   // at two runs beside each other, not for analysing both at once.
   primary?: boolean;
+  /** Named and scored so the benchmark panel can place the run. */
+  scenarioName?: string;
+  runScore?: number;
   onDeleted: () => void;
 }) {
   const [fullscreen, setFullscreen] = useState(false);
@@ -329,6 +339,12 @@ function ReplaySlot({
           }}
         />
         {primary && <ReplayInsights filePath={filePath} replayUrl={path} />}
+        {primary && scenarioName && (
+          <BenchmarkLadderPanel
+            scenarioName={scenarioName}
+            runScore={runScore ?? 0}
+          />
+        )}
       </div>
     );
   }
@@ -359,6 +375,12 @@ function ReplaySlot({
       {/* The panels need no video: everything in them is built from the run's
           own stats and trace. Only seeking waits for the clip. */}
       {primary && <ReplayInsights filePath={filePath} replayUrl="" />}
+      {primary && scenarioName && (
+        <BenchmarkLadderPanel
+          scenarioName={scenarioName}
+          runScore={runScore ?? 0}
+        />
+      )}
     </div>
   );
 }
