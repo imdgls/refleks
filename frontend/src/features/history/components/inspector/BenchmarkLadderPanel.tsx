@@ -42,18 +42,22 @@ import {
  * the player's behalf even so: every benchmark gets a tab carrying the rank
  * the scenario holds there, so the spread is readable without switching.
  *
- * The thresholds are printed on the played scenario's row only. They would
- * fit everywhere - even a thirteen-rank ladder leaves forty pixels a segment
- * - but a list of thirty-nine rows would then carry some three hundred
- * numbers, and none of them would be read. Any other row gives up its
- * thresholds on hover instead.
+ * The played scenario's row always prints the thresholds. Whether the other
+ * rows do is a preference, because it is a judgement rather than a fact:
+ * they fit - even a thirteen-rank ladder leaves forty pixels a segment, and
+ * 99% of the ladders reachable from a month's play have ten ranks or fewer -
+ * but thirty-nine rows of them is three hundred numbers, and whether that
+ * reads as context or as noise is not something to decide on someone's
+ * behalf. Off, the other rows give up their thresholds on hover instead.
  *
- * That asymmetry is also what makes the played row stand out: it is a block
- * of three lines among rows of one, which needs no decoration to find.
+ * Either way the played row is set apart by weight rather than by being the
+ * only one with numbers: larger, brighter figures, its own key line and
+ * markers, a ring and a block of three lines among rows of one.
  */
 
 const STORE_OPEN = "refleks.replay.ladder.open";
 const STORE_PICK = "refleks.replay.ladder.benchmark";
+const STORE_ROW_NUMBERS = "refleks.replay.ladder.rowNumbers";
 
 export function BenchmarkLadderPanel({
   scenarioName,
@@ -68,6 +72,10 @@ export function BenchmarkLadderPanel({
     useBenchmarks();
   const [open, setOpen] = usePersistedState(STORE_OPEN, true);
   const [pick, setPick] = usePersistedState<string>(STORE_PICK, "");
+  const [rowNumbers, setRowNumbers] = usePersistedState(
+    STORE_ROW_NUMBERS,
+    true,
+  );
   const requested = useRef(false);
 
   useEffect(() => {
@@ -93,20 +101,38 @@ export function BenchmarkLadderPanel({
 
   return (
     <div className="rounded-xl bg-surface-subtle">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-1 px-2 py-1 text-[0.6875rem] font-medium uppercase tracking-wider text-surface-muted-foreground hover:text-foreground"
-      >
-        <ChevronDown
-          className={cn(
-            "h-3 w-3 transition-transform",
-            open ? "" : "-rotate-90",
-          )}
-        />
-        Benchmarks
-      </button>
+      <div className="flex items-center gap-1 px-2 py-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-1 text-[0.6875rem] font-medium uppercase tracking-wider text-surface-muted-foreground hover:text-foreground"
+        >
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform",
+              open ? "" : "-rotate-90",
+            )}
+          />
+          Benchmarks
+        </button>
+        {open && selected && (
+          <button
+            type="button"
+            onClick={() => setRowNumbers((v) => !v)}
+            aria-pressed={rowNumbers}
+            title="Show each rank's score on every row, not only on yours"
+            className={cn(
+              "ml-auto rounded px-1.5 py-0.5 text-[0.625rem] transition-colors",
+              rowNumbers
+                ? "bg-surface text-foreground"
+                : "text-surface-muted-foreground hover:text-foreground",
+            )}
+          >
+            thresholds on every row
+          </button>
+        )}
+      </div>
 
       {open && (
         <div className="px-2 pb-2">
@@ -140,6 +166,7 @@ export function BenchmarkLadderPanel({
                 runScore={runScore}
                 normal={normal}
                 localBests={localBests}
+                rowNumbers={rowNumbers}
               />
             </>
           )}
@@ -218,12 +245,14 @@ function LadderList({
   runScore,
   normal,
   localBests,
+  rowNumbers,
 }: {
   list: BenchmarkList;
   scenarioName: string;
   runScore: number;
   normal: ScenarioNormal;
   localBests: Map<string, number>;
+  rowNumbers: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -331,6 +360,7 @@ function LadderList({
                       scenario={scenario}
                       ranks={list.ranks}
                       best={bestFor(scenario, localBests)}
+                      showNumbers={rowNumbers}
                     />
                   ),
                 )}
@@ -355,26 +385,34 @@ function LadderList({
  * which is the same picture and lets a threshold sit inside its cell with a
  * legible colour on both sides of the fill edge.
  */
+type Numbers = "none" | "dim" | "full";
+
 function LadderBar({
   thresholds,
   ranks,
   best,
-  showNumbers,
+  numbers,
   tall,
   children,
 }: {
   thresholds: number[];
   ranks: RankDef[];
   best: number;
-  showNumbers: boolean;
+  /** "dim" is the other rows: present, smaller, quieter than the played row. */
+  numbers: Numbers;
   tall: boolean;
   children?: React.ReactNode;
 }) {
   const bands = Math.max(0, thresholds.length - 1);
   const fillColor = computeFillColor(rankForScore(best, thresholds), ranks);
+  const height = tall
+    ? "h-[1.375rem]"
+    : numbers === "none"
+      ? "h-2.5"
+      : "h-[0.9375rem]";
 
   return (
-    <div className={cn("relative w-full", tall ? "h-[1.375rem]" : "h-2.5")}>
+    <div className={cn("relative w-full", height)}>
       <div
         className="absolute inset-0 grid overflow-hidden rounded-md"
         style={{ gridTemplateColumns: `repeat(${bands}, minmax(0, 1fr))` }}
@@ -395,9 +433,16 @@ function LadderBar({
                 className="absolute inset-y-0 left-0"
                 style={{ width: `${pct}%`, background: fillColor }}
               />
-              {showNumbers && (
+              {numbers !== "none" && (
                 <>
-                  <span className="relative z-10 text-[0.5625rem] tabular-nums text-foreground/70">
+                  <span
+                    className={cn(
+                      "relative z-10 tabular-nums",
+                      numbers === "full"
+                        ? "text-[0.5625rem] text-foreground/70"
+                        : "text-[0.5rem] text-foreground/40",
+                    )}
+                  >
                     {label}
                   </span>
                   {/* The same number again, clipped to the filled part, so it
@@ -405,7 +450,12 @@ function LadderBar({
                   {pct > 0 && (
                     <span
                       aria-hidden
-                      className="absolute inset-0 z-20 flex items-center justify-center text-[0.5625rem] font-medium tabular-nums text-canvas"
+                      className={cn(
+                        "absolute inset-0 z-20 flex items-center justify-center tabular-nums",
+                        numbers === "full"
+                          ? "text-[0.5625rem] font-medium text-canvas"
+                          : "text-[0.5rem] text-canvas/75",
+                      )}
                       style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}
                     >
                       {label}
@@ -427,10 +477,12 @@ function CompactRow({
   scenario,
   ranks,
   best,
+  showNumbers,
 }: {
   scenario: LadderScenario;
   ranks: RankDef[];
   best: number;
+  showNumbers: boolean;
 }) {
   const earned = rankName(best, scenario.thresholds, ranks);
   const fillColor = computeFillColor(
@@ -454,7 +506,7 @@ function CompactRow({
                 thresholds={scenario.thresholds}
                 ranks={ranks}
                 best={best}
-                showNumbers={false}
+                numbers={showNumbers ? "dim" : "none"}
                 tall={false}
               />
             </div>
@@ -573,7 +625,7 @@ function MarkedRow({
           thresholds={thresholds}
           ranks={ranks}
           best={best}
-          showNumbers
+          numbers="full"
           tall
         >
           {normal.normal !== null && (
