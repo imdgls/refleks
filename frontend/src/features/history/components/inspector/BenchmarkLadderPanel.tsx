@@ -409,7 +409,7 @@ function LadderBar({
     ? "h-[1.375rem]"
     : numbers === "none"
       ? "h-2.5"
-      : "h-[0.9375rem]";
+      : "h-[1.0625rem]";
 
   return (
     <div className={cn("relative w-full", height)}>
@@ -420,7 +420,7 @@ function LadderBar({
         {Array.from({ length: bands }, (_, i) => {
           const fill = cellFill(i, best, thresholds);
           const pct = Math.round(fill * 100);
-          const label = formatScore(thresholds[i + 1]);
+          const label = Math.round(thresholds[i + 1]).toString();
           return (
             <div
               key={i}
@@ -433,19 +433,27 @@ function LadderBar({
                 className="absolute inset-y-0 left-0"
                 style={{ width: `${pct}%`, background: fillColor }}
               />
-              {/* JetBrains Mono, which the app already ships and uses for
-                  timecodes. Montserrat is a geometric sans whose digits
-                  close up at eight pixels - 0 against 8, 3 against 8 - and
-                  its figures are proportional, so a column of thresholds
-                  does not line up. A monospace face fixes both. */}
+              {/* The body font, whose tabular figures already level the
+                  columns: its digits advance 0.342em to 0.652em by default,
+                  and tnum evens them out. A monospace face changed the
+                  letterforms without buying that, and at this size its
+                  tighter counters read worse rather than better.
+
+                  Ten pixels rather than eight, because the difficulty here
+                  was size. No thousands separator on the bar: it costs two
+                  pixels the narrowest ladder cannot spare - thirteen ranks
+                  leave a 37px cell against a 34px label - and a bar is not
+                  where anyone needs help reading five digits. The key line
+                  and the tooltip keep it. */}
               {numbers !== "none" && (
                 <>
                   <span
                     className={cn(
-                      "relative z-10 font-mono tabular-nums",
+                      "relative z-10 tabular-nums",
+                      "text-[0.625rem]",
                       numbers === "full"
-                        ? "text-[0.5625rem] text-foreground/70"
-                        : "text-[0.5rem] text-foreground/55",
+                        ? "font-medium text-foreground/85"
+                        : "text-foreground/55",
                     )}
                   >
                     {label}
@@ -460,10 +468,8 @@ function LadderBar({
                         // a translucent dark on a saturated rank colour is
                         // what made these unreadable. The quieter rows are
                         // quieter by size and by their unfilled colour only.
-                        "absolute inset-0 z-20 flex items-center justify-center font-medium font-mono tabular-nums text-canvas",
-                        numbers === "full"
-                          ? "text-[0.5625rem]"
-                          : "text-[0.5rem]",
+                        "absolute inset-0 z-20 flex items-center justify-center text-[0.625rem] font-medium tabular-nums text-canvas",
+                        numbers === "full" && "font-semibold",
                       )}
                       style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}
                     >
@@ -702,8 +708,7 @@ function Key({
             aria-hidden
             className="h-2 w-[5px] shrink-0 rounded-sm bg-foreground/35"
           />
-          normal{" "}
-          <span className="font-mono tabular-nums">{formatScore(normal)}</span>
+          normal <span className="tabular-nums">{formatScore(normal)}</span>
         </span>
       )}
 
@@ -716,9 +721,7 @@ function Key({
             className="h-2.5 w-0.5 shrink-0 rounded-full bg-foreground"
           />
           {isFirstEver ? "first run" : isNewRecord ? "new record" : "record"}{" "}
-          <span className="font-mono tabular-nums">
-            {formatScore(runScore)}
-          </span>
+          <span className="tabular-nums">{formatScore(runScore)}</span>
         </span>
       ) : (
         <>
@@ -728,9 +731,7 @@ function Key({
               className="h-2.5 w-0.5 shrink-0 rounded-full bg-foreground"
             />
             this run{" "}
-            <span className="font-mono tabular-nums">
-              {formatScore(runScore)}
-            </span>
+            <span className="tabular-nums">{formatScore(runScore)}</span>
           </span>
           <span className="flex items-center gap-1 text-surface-muted-foreground">
             <span
@@ -738,8 +739,7 @@ function Key({
               className="h-2 w-2 shrink-0 rounded-sm"
               style={{ background: fillColor }}
             />
-            record{" "}
-            <span className="font-mono tabular-nums">{formatScore(best)}</span>
+            record <span className="tabular-nums">{formatScore(best)}</span>
           </span>
         </>
       )}
@@ -781,10 +781,8 @@ function HoverDetail({
             {ofBest !== null && (
               <div>
                 This run reached{" "}
-                <span className="font-mono tabular-nums">
-                  {ofBest.toFixed(0)}%
-                </span>{" "}
-                of your record.
+                <span className="tabular-nums">{ofBest.toFixed(0)}%</span> of
+                your record.
               </div>
             )}
             {normal.normal !== null && (
@@ -798,11 +796,11 @@ function HoverDetail({
             {nextThreshold !== null && (
               <div className="text-popover-foreground/70">
                 {nextRankName ?? "Next rank"} needs{" "}
-                <span className="font-mono tabular-nums">
+                <span className="tabular-nums">
                   {formatScore(nextThreshold)}
                 </span>
                 , which is{" "}
-                <span className="font-mono tabular-nums">
+                <span className="tabular-nums">
                   {formatScore(nextThreshold - runScore)}
                 </span>{" "}
                 more than this run.
