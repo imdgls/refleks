@@ -589,10 +589,6 @@ function MarkedRow({
   const nextThreshold =
     runRank + 1 < thresholds.length ? thresholds[runRank + 1] : null;
   const nextRankName = ranks[runRank]?.name ?? null;
-  const toNext =
-    nextThreshold !== null && runScore > 0
-      ? ((nextThreshold - runScore) / runScore) * 100
-      : null;
 
   return (
     <div className="my-1 rounded-lg bg-primary/10 py-1.5 pl-1 pr-1 ring-1 ring-primary/30">
@@ -630,8 +626,6 @@ function MarkedRow({
         isRecord={isRecord}
         isNewRecord={isNewRecord}
         isFirstEver={isFirstEver}
-        toNext={toNext}
-        nextRankName={nextRankName}
         fillColor={fillColor}
       />
 
@@ -673,7 +667,13 @@ function MarkedRow({
   );
 }
 
-/** The fixed key: always the same items in the same order. */
+/**
+ * The fixed key: always the same items in the same order.
+ *
+ * What is left to the next rank used to sit here as a percentage and has
+ * been taken out: it read as something to aim at and turned out not to be.
+ * The tooltip still says what that rank asks for, in points.
+ */
 function Key({
   normal,
   runScore,
@@ -681,8 +681,6 @@ function Key({
   isRecord,
   isNewRecord,
   isFirstEver,
-  toNext,
-  nextRankName,
   fillColor,
 }: {
   normal: number | null;
@@ -691,15 +689,8 @@ function Key({
   isRecord: boolean;
   isNewRecord: boolean;
   isFirstEver: boolean;
-  toNext: number | null;
-  nextRankName: string | null;
   fillColor: string;
 }) {
-  const target =
-    toNext === null
-      ? "top rank"
-      : `${toNext.toFixed(toNext < 10 ? 1 : 0)}% to ${nextRankName ?? "next"}`;
-
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-3 text-[0.625rem]">
       {normal !== null && (
@@ -743,8 +734,6 @@ function Key({
           </span>
         </>
       )}
-
-      <span className="text-primary">{target}</span>
     </div>
   );
 }
