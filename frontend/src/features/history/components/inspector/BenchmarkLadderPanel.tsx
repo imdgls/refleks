@@ -440,7 +440,7 @@ function LadderBar({
                       "relative z-10 tabular-nums",
                       numbers === "full"
                         ? "text-[0.5625rem] text-foreground/70"
-                        : "text-[0.5rem] text-foreground/40",
+                        : "text-[0.5rem] text-foreground/55",
                     )}
                   >
                     {label}
@@ -451,10 +451,14 @@ function LadderBar({
                     <span
                       aria-hidden
                       className={cn(
-                        "absolute inset-0 z-20 flex items-center justify-center tabular-nums",
+                        // Over the fill the contrast colour is never diluted:
+                        // a translucent dark on a saturated rank colour is
+                        // what made these unreadable. The quieter rows are
+                        // quieter by size and by their unfilled colour only.
+                        "absolute inset-0 z-20 flex items-center justify-center font-medium tabular-nums text-canvas",
                         numbers === "full"
-                          ? "text-[0.5625rem] font-medium text-canvas"
-                          : "text-[0.5rem] text-canvas/75",
+                          ? "text-[0.5625rem]"
+                          : "text-[0.5rem]",
                       )}
                       style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}
                     >
